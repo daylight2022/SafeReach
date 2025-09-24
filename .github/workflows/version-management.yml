@@ -174,6 +174,5 @@ jobs:
               \"version\": \"${{ steps.version_info.outputs.version }}\",
               \"versionCode\": ${{ steps.version_code.outputs.code }},
               \"releaseNotes\": $(echo "$RELEASE_NOTES" | jq -R -s .),
-              \"downloadUrl\": \"\",
               \"isPrerelease\": false
             }" || echo "Failed to push version to backend, continuing..."
