@@ -163,7 +163,7 @@ jobs:
           echo -e "$FORMATTED_COMMITS" >> release_notes.txt
           echo "" >> release_notes.txt
           echo "### 发布时间" >> release_notes.txt
-          echo "$(date '+%Y-%m-%d %H:%M:%S')" >> release_notes.txt
+          echo "$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')" >> release_notes.txt
           echo "" >> release_notes.txt
           echo "### 版本类型" >> release_notes.txt
           echo "${{ steps.update_type.outputs.update_type }} 更新" >> release_notes.txt
