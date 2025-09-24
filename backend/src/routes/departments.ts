@@ -23,7 +23,6 @@ import {
 import {
   updateDepartmentPath,
   validateDepartmentHierarchy,
-  getUserAccessibleDepartments,
 } from '../utils/departmentUtils.js';
 import { convertDbToApi } from '../utils/fieldMapping.js';
 import { z } from 'zod';
@@ -36,6 +35,7 @@ departmentsRouter.use('*', authMiddleware);
 /**
  * 获取部门列表
  * GET /departments
+ * 所有认证用户都可以查看完整的部门列表（用于查看组织架构）
  */
 departmentsRouter.get(
   '/',
@@ -51,32 +51,13 @@ departmentsRouter.get(
     try {
       const { page, limit, search, parentId, level, isActive } =
         c.get('validatedQuery');
-      const currentUser = c.get('user');
 
-      // 获取用户可访问的部门
-      const accessibleDepartments = await getUserAccessibleDepartments(
-        currentUser.userId,
-        currentUser.role,
-        currentUser.departmentId,
-      );
+      // 构建查询条件 - 所有认证用户都可以查看所有部门
+      const conditions = [];
 
-      const accessibleIds = accessibleDepartments.map(dept => dept.id);
-
-      if (accessibleIds.length === 0) {
-        return paginatedResponse(c, [], 0, page, limit);
-      }
-
-      // 构建查询条件 - 使用 inArray 来匹配可访问的部门ID
-      let whereClause =
-        accessibleIds.length === 1
-          ? eq(departments.id, accessibleIds[0])
-          : or(...accessibleIds.map(id => eq(departments.id, id)));
-
-      // 添加其他过滤条件
-      const additionalConditions = [];
-
+      // 添加过滤条件
       if (search) {
-        additionalConditions.push(
+        conditions.push(
           or(
             like(departments.name, `%${search}%`),
             like(departments.code, `%${search}%`),
@@ -86,20 +67,19 @@ departmentsRouter.get(
       }
 
       if (parentId !== undefined) {
-        additionalConditions.push(eq(departments.parentId, parentId));
+        conditions.push(eq(departments.parentId, parentId));
       }
 
       if (level !== undefined) {
-        additionalConditions.push(eq(departments.level, level));
+        conditions.push(eq(departments.level, level));
       }
 
       if (isActive !== undefined) {
-        additionalConditions.push(eq(departments.isActive, isActive));
+        conditions.push(eq(departments.isActive, isActive));
       }
 
-      if (additionalConditions.length > 0) {
-        whereClause = and(whereClause, ...additionalConditions);
-      }
+      const whereClause =
+        conditions.length > 0 ? and(...conditions) : undefined;
 
       // 获取总数
       const [{ total }] = await db
@@ -133,17 +113,20 @@ departmentsRouter.get(
 /**
  * 获取部门树形结构
  * GET /departments/tree
+ * 所有认证用户都可以查看完整的部门树形结构（用于查看组织架构）
  */
 departmentsRouter.get('/tree', async c => {
   try {
-    const currentUser = c.get('user');
-
-    // 获取用户可访问的部门
-    const accessibleDepartments = await getUserAccessibleDepartments(
-      currentUser.userId,
-      currentUser.role,
-      currentUser.departmentId,
-    );
+    // 获取所有启用的部门
+    const allDepartments = await db
+      .select()
+      .from(departments)
+      .where(eq(departments.isActive, true))
+      .orderBy(
+        asc(departments.level),
+        asc(departments.sortOrder),
+        asc(departments.name),
+      );
 
     // 构建树形结构
     const buildTree = (
@@ -161,7 +144,7 @@ departmentsRouter.get('/tree', async c => {
         );
     };
 
-    const tree = buildTree(accessibleDepartments);
+    const tree = buildTree(allDepartments);
 
     // 转换字段名为驼峰命名
     const convertedTree = convertDbToApi(tree);
@@ -175,6 +158,7 @@ departmentsRouter.get('/tree', async c => {
 /**
  * 获取指定部门信息
  * GET /departments/:id
+ * 所有认证用户都可以查看部门信息（用于查看组织架构）
  */
 departmentsRouter.get(
   '/:id',
@@ -182,19 +166,6 @@ departmentsRouter.get(
   async c => {
     try {
       const { id } = c.get('validatedParams');
-      const currentUser = c.get('user');
-
-      // 检查用户是否有权限访问该部门
-      const accessibleDepartments = await getUserAccessibleDepartments(
-        currentUser.userId,
-        currentUser.role,
-        currentUser.departmentId,
-      );
-
-      const hasAccess = accessibleDepartments.some(dept => dept.id === id);
-      if (!hasAccess) {
-        return errorResponse(c, '权限不足', 403);
-      }
 
       const department = await db
         .select()

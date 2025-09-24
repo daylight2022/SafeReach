@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { AppState } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { COLORS } from '@/utils/constants';
 import { userStorage } from '@/utils/storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { authEvents } from '@/utils/authEvents';
 
 // Import screens
 import LoginScreen from '@/screens/LoginScreen';
@@ -70,23 +72,44 @@ const MainTabs = () => {
 const AppNavigator = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // 检查登录状态
-  useEffect(() => {
-    const checkLoginStatus = () => {
-      const isUserLoggedIn = userStorage.isLoggedIn();
-      setIsLoggedIn(isUserLoggedIn);
-    };
-
-    checkLoginStatus();
+  // 检查登录状态的函数
+  const checkLoginStatus = React.useCallback(() => {
+    const isUserLoggedIn = userStorage.isLoggedIn();
+    setIsLoggedIn(isUserLoggedIn);
   }, []);
+
+  // 初始检查登录状态
+  useEffect(() => {
+    checkLoginStatus();
+  }, [checkLoginStatus]);
 
   // 当导航器获得焦点时重新检查登录状态
   useFocusEffect(
     React.useCallback(() => {
-      const isUserLoggedIn = userStorage.isLoggedIn();
-      setIsLoggedIn(isUserLoggedIn);
-    }, []),
+      checkLoginStatus();
+    }, [checkLoginStatus]),
   );
+
+  // 监听应用状态变化，当应用从后台回到前台时检查登录状态
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: string) => {
+      if (nextAppState === 'active') {
+        checkLoginStatus();
+      }
+    };
+
+    const subscription = AppState.addEventListener(
+      'change',
+      handleAppStateChange,
+    );
+    return () => subscription?.remove();
+  }, [checkLoginStatus]);
+
+  // 监听认证事件，立即响应登录状态变化
+  useEffect(() => {
+    const removeListener = authEvents.addListener(checkLoginStatus);
+    return removeListener;
+  }, [checkLoginStatus]);
 
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>

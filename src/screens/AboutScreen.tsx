@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { NavigationProp } from '@react-navigation/native';
 import { COLORS } from '@/utils/constants';
 import { toast } from 'burnt';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { getAppVersionWithPrefix, getAppBuildNumber } from '@/utils/version';
 
 const { width } = Dimensions.get('window');
 
@@ -24,7 +25,7 @@ interface Props {
 
 const AboutScreen: React.FC<Props> = ({ navigation }) => {
   const [showQRCode, setShowQRCode] = useState(false);
-  const appInfo = {
+  const [appInfo, setAppInfo] = useState({
     name: '安心通',
     version: 'v1.0.0',
     buildNumber: '20250914',
@@ -32,7 +33,27 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
     copyright: '© 2025 All Rights Reserved',
     description:
       '专为企业设计的在外人员联系管理系统，帮助管理者及时了解员工动态，提醒注意事项，确保人员稳定安全。',
-  };
+  });
+
+  // 获取应用版本信息
+  useEffect(() => {
+    const loadVersionInfo = async () => {
+      try {
+        const version = getAppVersionWithPrefix();
+        const buildNumber = await getAppBuildNumber();
+
+        setAppInfo(prev => ({
+          ...prev,
+          version,
+          buildNumber,
+        }));
+      } catch (error) {
+        console.error('获取版本信息失败:', error);
+      }
+    };
+
+    loadVersionInfo();
+  }, []);
 
   const features = [
     {

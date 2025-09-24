@@ -19,6 +19,8 @@ import { COLORS } from '@/utils/constants';
 import { User } from '@/types';
 import { toast } from 'burnt';
 import { userStorage } from '@/utils/storage';
+import { getAppVersionWithPrefix } from '@/utils/version';
+import { authEvents } from '@/utils/authEvents';
 
 interface Props {
   navigation: NavigationProp<any>;
@@ -27,6 +29,7 @@ interface Props {
 const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [user, setUser] = useState<User | null>(null);
   const [departmentName, setDepartmentName] = useState<string>('');
+  const [appVersion, setAppVersion] = useState<string>('v1.0.0');
   const [statistics, setStatistics] = useState({
     managedPersons: 0,
     monthlyContacts: 0,
@@ -36,7 +39,17 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     loadUserData();
     loadStatistics();
+    loadVersionInfo();
   }, []);
+
+  const loadVersionInfo = () => {
+    try {
+      const version = getAppVersionWithPrefix();
+      setAppVersion(version);
+    } catch (error) {
+      console.error('获取版本信息失败:', error);
+    }
+  };
 
   const loadUserData = async () => {
     try {
@@ -124,7 +137,8 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
             preset: 'done',
           });
 
-          // 不需要手动重置导航，AppNavigator会自动检测登录状态变化
+          // 立即触发认证状态变化事件，通知AppNavigator更新状态
+          authEvents.emit();
         },
       },
     ]);
@@ -169,7 +183,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         title: '关于系统',
         color: '#6B7280',
         bgColor: '#F3F4F6',
-        version: 'v1.0.0' as const,
+        version: appVersion,
         onPress: () => navigation.navigate('About'),
       },
     ];
@@ -249,7 +263,7 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.menuTitle}>{item.title}</Text>
               </View>
               {'version' in item ? (
-                <Text style={styles.menuVersion}>{item.version}</Text>
+                <Text style={styles.menuVersion}>{String(item.version)}</Text>
               ) : (
                 <Icon name="chevron-right" size={14} color={COLORS.darkGray} />
               )}
