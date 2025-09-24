@@ -48,21 +48,29 @@ const useVersionCheck = (): UseVersionCheckReturn => {
         }
       }
 
-      // 检查版本更新
-      const response = await apiServices.version.checkForUpdates();
-      
+      // 获取最新版本信息
+      const response = await apiServices.version.getLatestVersion();
+
       if (response.success && response.data) {
-        const checkResult = response.data;
-        setHasUpdate(checkResult.hasUpdate);
-        
-        if (checkResult.hasUpdate && checkResult.latestVersion) {
-          setLatestVersion(checkResult.latestVersion);
-          
+        const latestVersionData = response.data;
+        setLatestVersion(latestVersionData);
+
+        // 在客户端比较版本号
+        const compareResult = apiServices.version.compareVersions(
+          latestVersionData.version,
+          versionInfo.version,
+        );
+
+        // 只有当在线版本大于当前版本时才认为有更新
+        const hasUpdateAvailable = compareResult > 0;
+        setHasUpdate(hasUpdateAvailable);
+
+        if (hasUpdateAvailable) {
           // 检查是否是新版本（避免重复提示）
           const lastNotifiedVersion = storage.getString('lastNotifiedVersion');
-          if (lastNotifiedVersion !== checkResult.latestVersion.version) {
+          if (lastNotifiedVersion !== latestVersionData.version) {
             setShowUpdateModal(true);
-            storage.set('lastNotifiedVersion', checkResult.latestVersion.version);
+            storage.set('lastNotifiedVersion', latestVersionData.version);
           }
         }
       }
@@ -110,7 +118,7 @@ const useVersionCheck = (): UseVersionCheckReturn => {
           const now = new Date();
           const timeDiff = now.getTime() - lastCheck.getTime();
           const hoursDiff = timeDiff / (1000 * 3600);
-          
+
           // 如果距离上次检查超过4小时，则重新检查
           if (hoursDiff >= 4) {
             checkForUpdates();
@@ -118,14 +126,17 @@ const useVersionCheck = (): UseVersionCheckReturn => {
         } else {
           checkForUpdates();
         }
-        
+
         // 更新最后检查时间
         storage.set('lastCheckTime', new Date().toISOString());
       }
     };
 
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    
+    const subscription = AppState.addEventListener(
+      'change',
+      handleAppStateChange,
+    );
+
     return () => {
       subscription?.remove();
     };

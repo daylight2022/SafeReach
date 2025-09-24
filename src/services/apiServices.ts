@@ -169,6 +169,13 @@ export const reminderService = {
     return apiClient.delete(`/reminders/${id}`);
   },
 
+  // 删除指定人员当日的未处理提醒记录
+  deletePersonTodayReminders: async (
+    personId: string,
+  ): Promise<ApiResponse<{ deletedCount: number }>> => {
+    return apiClient.delete(`/reminders/person/${personId}/today`);
+  },
+
   // 标记提醒为已处理
   markAsHandled: async (id: string): Promise<ApiResponse<Reminder>> => {
     return apiClient.put(`/reminders/${id}`, { isHandled: true });

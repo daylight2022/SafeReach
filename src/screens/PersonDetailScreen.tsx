@@ -21,6 +21,7 @@ import {
   leaveService,
   contactService,
   departmentService,
+  reminderService,
 } from '@/services/apiServices';
 import { COLORS } from '@/utils/constants';
 import { Person, Leave, Contact } from '@/types';
@@ -145,6 +146,22 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             if (!contactResult.success) {
               console.error('创建联系记录失败:', contactResult.message);
               throw new Error(`联系记录创建失败: ${contactResult.message}`);
+            }
+
+            // 清除该人员当日的未处理提醒记录
+            try {
+              const reminderResult =
+                await reminderService.deletePersonTodayReminders(personId);
+              if (reminderResult.success) {
+                const deletedCount = reminderResult.data?.deletedCount || 0;
+                console.log(`✅ 已清除 ${deletedCount} 条当日提醒记录`);
+              } else {
+                console.warn('清除提醒记录失败:', reminderResult.message);
+                // 不抛出错误，因为联系记录已经创建成功
+              }
+            } catch (reminderError) {
+              console.warn('清除提醒记录时出错:', reminderError);
+              // 不抛出错误，因为联系记录已经创建成功
             }
 
             // 后端已经自动更新了人员的最后联系信息，无需前端重复更新

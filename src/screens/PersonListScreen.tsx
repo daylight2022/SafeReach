@@ -339,6 +339,14 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
               placeholderTextColor="#9CA3AF"
               underlineColorAndroid="transparent" // 顺便去掉 Android 下的默认下划线
             />
+            {searchText.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setSearchText('')}
+                style={styles.clearButton}
+              >
+                <Icon name="times-circle" size={16} color="#9CA3AF" />
+              </TouchableOpacity>
+            )}
           </View>
           <View style={styles.actionButtons}>
             <TouchableOpacity
@@ -454,6 +462,10 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
     textAlignVertical: 'center',
     paddingTop: 4,
+  },
+  clearButton: {
+    marginLeft: 8,
+    padding: 2,
   },
   actionButtons: {
     flexDirection: 'row',

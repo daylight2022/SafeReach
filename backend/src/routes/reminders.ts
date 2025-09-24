@@ -495,4 +495,83 @@ remindersRouter.delete(
   },
 );
 
+/**
+ * 删除指定人员当日的未处理提醒记录
+ * DELETE /reminders/person/:personId/today
+ */
+remindersRouter.delete(
+  '/person/:personId/today',
+  validateParams(z.object({ personId: z.string().uuid() })),
+  async c => {
+    try {
+      const { personId } = c.get('validatedParams');
+      const currentUser = c.get('user');
+
+      // 获取当前日期
+      const currentDate = new Date()
+        .toLocaleDateString('zh-CN', {
+          timeZone: 'Asia/Shanghai',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        })
+        .replace(/\//g, '-');
+
+      // 获取用户可访问的部门ID列表
+      const accessibleDepartmentIds = await getUserAccessibleDepartmentIds(
+        currentUser.userId,
+        currentUser.role,
+        currentUser.departmentId,
+      );
+
+      // 检查人员是否存在且有权限访问
+      const personConditions = [eq(persons.id, personId)];
+      if (currentUser.role !== 'admin') {
+        if (accessibleDepartmentIds.length > 0) {
+          personConditions.push(
+            inArray(persons.departmentId, accessibleDepartmentIds),
+          );
+        } else {
+          return notFoundResponse(c, '人员不存在或无权限访问');
+        }
+      }
+
+      const existingPerson = await db
+        .select({ id: persons.id })
+        .from(persons)
+        .where(and(...personConditions))
+        .limit(1);
+
+      if (existingPerson.length === 0) {
+        return notFoundResponse(c, '人员不存在或无权限访问');
+      }
+
+      // 删除该人员当日的未处理提醒记录
+      const deleteResult = await db
+        .delete(reminders)
+        .where(
+          and(
+            eq(reminders.personId, personId),
+            eq(reminders.reminderDate, currentDate),
+            eq(reminders.isHandled, false),
+          ),
+        );
+
+      const deletedCount = (deleteResult as any).rowCount || 0;
+      console.log(
+        `🧹 已清除人员 ${personId} 当日的 ${deletedCount} 条未处理提醒记录`,
+      );
+
+      return successResponse(
+        c,
+        { deletedCount },
+        `已清除 ${deletedCount} 条当日提醒记录`,
+      );
+    } catch (error) {
+      console.error('删除人员当日提醒记录失败:', error);
+      return serverErrorResponse(c, error);
+    }
+  },
+);
+
 export default remindersRouter;
