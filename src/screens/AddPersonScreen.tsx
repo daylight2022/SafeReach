@@ -78,6 +78,8 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
     endDate: new Date(),
   });
 
+  const [currentLeave, setCurrentLeave] = useState<any>(null); // 当前活跃的在外记录
+
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
@@ -105,6 +107,9 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
         annualLeaveUsed: editPerson.annualLeaveUsed.toString(),
         annualLeaveTimes: editPerson.annualLeaveTimes.toString(),
       });
+
+      // 加载当前人员的在外记录
+      loadCurrentLeave(editPerson.id);
     }
   }, [editPerson]);
 
@@ -148,6 +153,30 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
       }
     } catch (error) {
       console.error('🏢 加载部门列表失败:', error);
+    }
+  };
+
+  const loadCurrentLeave = async (personId: string) => {
+    try {
+      const result = await leaveService.getLeaves(personId);
+      if (result.success && result.data) {
+        // 找到当前活跃的在外记录
+        const activeLeave = result.data.find(
+          leave => leave.status === 'active',
+        );
+        if (activeLeave) {
+          setCurrentLeave(activeLeave);
+          // 将在外记录数据填充到表单中
+          setLeaveData({
+            leaveType: activeLeave.leaveType,
+            location: activeLeave.location || '',
+            startDate: new Date(activeLeave.startDate),
+            endDate: new Date(activeLeave.endDate),
+          });
+        }
+      }
+    } catch (error) {
+      console.error('加载在外记录失败:', error);
     }
   };
 
@@ -256,6 +285,64 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
         if (!result.success) {
           console.error('更新人员信息失败:', result.message);
           throw new Error(`更新失败: ${result.message}`);
+        }
+
+        // 处理在外信息的更新
+        if (leaveData.location) {
+          if (currentLeave) {
+            // 更新现有的在外记录
+            const leaveResult = await leaveService.updateLeave(
+              currentLeave.id,
+              {
+                leaveType: leaveData.leaveType,
+                location: leaveData.location,
+                startDate: dayjs(leaveData.startDate).format('YYYY-MM-DD'),
+                endDate: dayjs(leaveData.endDate).format('YYYY-MM-DD'),
+                days: calculateDays(),
+                status: 'active',
+              },
+            );
+
+            if (!leaveResult.success) {
+              console.error('更新在外记录失败:', leaveResult.message);
+              showWarningToast(
+                '人员信息更新成功，但在外记录更新失败',
+                '请手动修改在外信息',
+              );
+            }
+          } else {
+            // 创建新的在外记录
+            const leaveResult = await leaveService.createLeave({
+              personId: editPerson.id,
+              leaveType: leaveData.leaveType,
+              location: leaveData.location,
+              startDate: dayjs(leaveData.startDate).format('YYYY-MM-DD'),
+              endDate: dayjs(leaveData.endDate).format('YYYY-MM-DD'),
+              days: calculateDays(),
+              status: 'active',
+            });
+
+            if (!leaveResult.success) {
+              console.error('创建在外记录失败:', leaveResult.message);
+              showWarningToast(
+                '人员信息更新成功，但在外记录创建失败',
+                '请手动添加在外信息',
+              );
+            }
+          }
+        } else if (currentLeave) {
+          // 如果清空了在外地点，但之前有在外记录，则将状态改为completed
+          const leaveResult = await leaveService.updateLeave(currentLeave.id, {
+            status: 'completed',
+          });
+
+          if (!leaveResult.success) {
+            console.error('完成在外记录失败:', leaveResult.message);
+            showWarningToast(
+              '人员信息更新成功，但在外记录状态更新失败',
+              '请手动处理在外记录',
+            );
+          }
         }
 
         showOperationSuccessToast('update', formData.name);
@@ -416,92 +503,90 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
         </View>
 
         {/* 在外信息 */}
-        {!isEdit && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>在外信息</Text>
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>在外类型</Text>
-              <View style={styles.typeSelector}>
-                {(
-                  ['vacation', 'business', 'study', 'hospitalization'] as const
-                ).map(type => (
-                  <TouchableOpacity
-                    key={type}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>在外信息</Text>
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>在外类型</Text>
+            <View style={styles.typeSelector}>
+              {(
+                ['vacation', 'business', 'study', 'hospitalization'] as const
+              ).map(type => (
+                <TouchableOpacity
+                  key={type}
+                  style={[
+                    styles.typeOption,
+                    leaveData.leaveType === type && styles.typeOptionActive,
+                  ]}
+                  onPress={() =>
+                    setLeaveData({ ...leaveData, leaveType: type })
+                  }
+                >
+                  <Text
                     style={[
-                      styles.typeOption,
-                      leaveData.leaveType === type && styles.typeOptionActive,
+                      styles.typeText,
+                      leaveData.leaveType === type && styles.typeTextActive,
                     ]}
-                    onPress={() =>
-                      setLeaveData({ ...leaveData, leaveType: type })
-                    }
                   >
-                    <Text
-                      style={[
-                        styles.typeText,
-                        leaveData.leaveType === type && styles.typeTextActive,
-                      ]}
-                    >
-                      {type === 'vacation'
-                        ? '休假'
-                        : type === 'business'
-                        ? '出差'
-                        : type === 'study'
-                        ? '学习'
-                        : '住院'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>在外地点</Text>
-              <TextInput
-                placeholder="详细到市/区"
-                value={leaveData.location}
-                onChangeText={(text: string) =>
-                  setLeaveData({ ...leaveData, location: text })
-                }
-                style={styles.input}
-                placeholderTextColor="#9CA3AF"
-                underlineColorAndroid="transparent"
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>开始日期</Text>
-              <TouchableOpacity
-                style={styles.dateInput}
-                onPress={() => setShowStartDatePicker(true)}
-              >
-                <Text style={styles.dateText}>
-                  {dayjs(leaveData.startDate).format('YYYY-MM-DD')}
-                </Text>
-                <Icon name="calendar" size={16} color={COLORS.darkGray} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>结束日期</Text>
-              <TouchableOpacity
-                style={styles.dateInput}
-                onPress={() => setShowEndDatePicker(true)}
-              >
-                <Text style={styles.dateText}>
-                  {dayjs(leaveData.endDate).format('YYYY-MM-DD')}
-                </Text>
-                <Icon name="calendar" size={16} color={COLORS.darkGray} />
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>本次天数</Text>
-              <View style={[styles.input, styles.disabledInput]}>
-                <Text style={styles.disabledText}>{calculateDays()}天</Text>
-              </View>
+                    {type === 'vacation'
+                      ? '休假'
+                      : type === 'business'
+                      ? '出差'
+                      : type === 'study'
+                      ? '学习'
+                      : '住院'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
-        )}
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>在外地点</Text>
+            <TextInput
+              placeholder="详细到市/区"
+              value={leaveData.location}
+              onChangeText={(text: string) =>
+                setLeaveData({ ...leaveData, location: text })
+              }
+              style={styles.input}
+              placeholderTextColor="#9CA3AF"
+              underlineColorAndroid="transparent"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>开始日期</Text>
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowStartDatePicker(true)}
+            >
+              <Text style={styles.dateText}>
+                {dayjs(leaveData.startDate).format('YYYY-MM-DD')}
+              </Text>
+              <Icon name="calendar" size={16} color={COLORS.darkGray} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>结束日期</Text>
+            <TouchableOpacity
+              style={styles.dateInput}
+              onPress={() => setShowEndDatePicker(true)}
+            >
+              <Text style={styles.dateText}>
+                {dayjs(leaveData.endDate).format('YYYY-MM-DD')}
+              </Text>
+              <Icon name="calendar" size={16} color={COLORS.darkGray} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>本次天数</Text>
+            <View style={[styles.input, styles.disabledInput]}>
+              <Text style={styles.disabledText}>{calculateDays()}天</Text>
+            </View>
+          </View>
+        </View>
 
         {/* 联系方式 */}
         <View style={styles.section}>
