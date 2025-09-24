@@ -1,3 +1,41 @@
+# SafeReach - 安心通
+
+SafeReach 是一个基于 React Native 开发的在外人员管理系统，现已集成完整的版本管理和自动更新功能。
+
+## ✨ 新功能：自动版本检测更新
+
+- 🔄 **自动检测**: 应用启动时自动检查新版本
+- 📱 **更新提醒**: 优雅的更新弹框，展示更新日志
+- 🤖 **自动化**: GitHub Actions 自动管理版本发布
+- 🔗 **便捷下载**: 支持直接下载或复制链接
+- 📊 **版本历史**: 完整的版本更新记录
+
+详细文档请查看：[版本管理功能文档](docs/VERSION_MANAGEMENT.md)
+
+## 🚀 版本管理快速开始
+
+### 开发者版本更新
+
+```bash
+# 主版本更新 (重大变更)
+npm run version:major
+
+# 次版本更新 (新功能)
+npm run version:minor
+
+# 补丁更新 (Bug修复)
+npm run version:patch
+```
+
+### 用户体验
+
+- 应用启动时自动检查更新
+- 发现新版本时显示更新弹框
+- 支持查看历史版本和更新日志
+- 一键下载或复制下载链接
+
+---
+
 This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
 # Getting Started

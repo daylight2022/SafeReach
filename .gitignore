@@ -6,10 +6,13 @@
 tmp
 ios
 android
-# backend
-backend/
 # docs
 docs/
+
+# backend
+drizzle/
+migrations/
+ssh_key
 
 # Xcode
 #

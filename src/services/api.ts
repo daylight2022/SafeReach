@@ -330,6 +330,11 @@ class ApiClient {
   async delete<T = any>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { method: 'DELETE' });
   }
+
+  // 获取API基础URL
+  getBaseUrl(): string {
+    return API_BASE_URL;
+  }
 }
 
 // 导出单例实例

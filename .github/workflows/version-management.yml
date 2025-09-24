@@ -1,0 +1,179 @@
+name: Version Management
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "package.json" # 只有当 package.json 发生变化时才触发
+  workflow_dispatch:
+
+jobs:
+  version-sync:
+    # 当 package.json 中的版本号发生变化时，同步到后端
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # 需要获取前一个提交来比较版本变化
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get version information
+        id: version_info
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+          # 检查是否是手动触发或版本确实发生了变化
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual trigger - will sync current version"
+            echo "should_sync=true" >> $GITHUB_OUTPUT
+          else
+            # 检查版本是否发生变化
+            PREVIOUS_VERSION=$(git show HEAD~1:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).version" 2>/dev/null || echo "0.0.0")
+            echo "Previous version: $PREVIOUS_VERSION"
+
+            if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+              echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+              echo "should_sync=true" >> $GITHUB_OUTPUT
+            else
+              echo "Version unchanged - skipping sync"
+              echo "should_sync=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Determine update type
+        id: update_type
+        if: steps.version_info.outputs.should_sync == 'true'
+        run: |
+          CURRENT_VERSION="${{ steps.version_info.outputs.version }}"
+
+          # 尝试获取上一个版本
+          PREVIOUS_VERSION=$(git show HEAD~1:package.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8')).version" 2>/dev/null || echo "0.0.0")
+
+          echo "Comparing versions: $PREVIOUS_VERSION -> $CURRENT_VERSION"
+
+          # 解析版本号
+          IFS='.' read -ra CURRENT_PARTS <<< "$CURRENT_VERSION"
+          IFS='.' read -ra PREVIOUS_PARTS <<< "$PREVIOUS_VERSION"
+
+          CURRENT_MAJOR=${CURRENT_PARTS[0]:-0}
+          CURRENT_MINOR=${CURRENT_PARTS[1]:-0}
+          CURRENT_PATCH=${CURRENT_PARTS[2]:-0}
+
+          PREVIOUS_MAJOR=${PREVIOUS_PARTS[0]:-0}
+          PREVIOUS_MINOR=${PREVIOUS_PARTS[1]:-0}
+          PREVIOUS_PATCH=${PREVIOUS_PARTS[2]:-0}
+
+          # 确定更新类型
+          if [ "$CURRENT_MAJOR" -gt "$PREVIOUS_MAJOR" ]; then
+            echo "update_type=major" >> $GITHUB_OUTPUT
+            echo "Update type: major"
+          elif [ "$CURRENT_MINOR" -gt "$PREVIOUS_MINOR" ]; then
+            echo "update_type=minor" >> $GITHUB_OUTPUT
+            echo "Update type: minor"
+          elif [ "$CURRENT_PATCH" -gt "$PREVIOUS_PATCH" ]; then
+            echo "update_type=patch" >> $GITHUB_OUTPUT
+            echo "Update type: patch"
+          else
+            echo "update_type=patch" >> $GITHUB_OUTPUT
+            echo "Update type: patch (default)"
+          fi
+
+      - name: Generate version code
+        id: version_code
+        if: steps.version_info.outputs.should_sync == 'true'
+        run: |
+          VERSION="${{ steps.version_info.outputs.version }}"
+          IFS='.' read -ra PARTS <<< "$VERSION"
+          MAJOR=${PARTS[0]:-0}
+          MINOR=${PARTS[1]:-0}
+          PATCH=${PARTS[2]:-0}
+
+          # 计算版本代码: major * 10000 + minor * 100 + patch
+          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          echo "code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Version code: $VERSION_CODE"
+
+      - name: Generate release notes
+        id: release_notes
+        if: steps.version_info.outputs.should_sync == 'true'
+        run: |
+          # 获取最近的提交信息作为发布说明
+          RECENT_COMMITS=$(git log --pretty=format:"- %s" --no-merges -10)
+
+          # 如果没有提交，使用默认消息
+          if [ -z "$RECENT_COMMITS" ]; then
+            RECENT_COMMITS="- 版本更新和bug修复"
+          fi
+
+          # 创建发布说明
+          RELEASE_NOTES="## 版本 ${{ steps.version_info.outputs.version }}
+
+          ### 更新内容
+          $RECENT_COMMITS
+
+          ### 发布时间
+          $(date '+%Y-%m-%d %H:%M:%S')
+
+          ### 版本类型
+          ${{ steps.update_type.outputs.update_type }} 更新"
+
+          # 保存到文件，避免特殊字符问题
+          echo "$RELEASE_NOTES" > release_notes.txt
+          echo "Release notes generated"
+
+      - name: Push version to backend
+        if: steps.version_info.outputs.should_sync == 'true'
+        run: |
+          # 读取发布说明
+          RELEASE_NOTES=$(cat release_notes.txt)
+
+          # 先登录获取 token
+          echo "正在登录获取认证令牌..."
+          LOGIN_RESPONSE=$(curl -s -X POST "${{ secrets.BACKEND_API_URL }}/auth/login" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"username\": \"${{ secrets.BACKEND_ADMIN_USERNAME }}\",
+              \"password\": \"${{ secrets.BACKEND_ADMIN_PASSWORD }}\"
+            }")
+
+          # 检查登录是否成功
+          if [ $? -ne 0 ]; then
+            echo "登录请求失败"
+            exit 1
+          fi
+
+          # 提取 token
+          TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.data.token // empty')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "登录失败或无法获取 token"
+            echo "登录响应: $LOGIN_RESPONSE"
+            exit 1
+          fi
+
+          echo "登录成功，正在推送版本信息..."
+
+          # 推送版本信息到后端API
+          curl -X POST "${{ secrets.BACKEND_API_URL }}/versions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $TOKEN" \
+            -d "{
+              \"version\": \"${{ steps.version_info.outputs.version }}\",
+              \"versionCode\": ${{ steps.version_code.outputs.code }},
+              \"releaseNotes\": $(echo "$RELEASE_NOTES" | jq -R -s .),
+              \"downloadUrl\": \"\",
+              \"isPrerelease\": false
+            }" || echo "Failed to push version to backend, continuing..."

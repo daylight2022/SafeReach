@@ -1,5 +1,6 @@
 import { apiClient, ApiResponse } from './api';
 import { User, Person, Leave, Contact, Reminder, Department } from '@/types';
+import versionService from './versionService';
 
 // 用户服务
 export const userService = {
@@ -331,4 +332,5 @@ export const apiServices = {
   reminder: reminderService,
   statistics: statisticsService,
   department: departmentService,
+  version: versionService,
 };
