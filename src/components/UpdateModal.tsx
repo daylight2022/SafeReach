@@ -7,11 +7,10 @@ import {
   ScrollView,
   StyleSheet,
   Dimensions,
-  Alert,
-  Linking,
   ActivityIndicator,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { toast } from 'burnt';
 import { AppVersion, VersionHistoryResponse } from '@/services/versionService';
 import { apiServices } from '@/services/apiServices';
 
@@ -43,7 +42,11 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
   const loadVersionHistory = async () => {
     setLoading(true);
     try {
-      const response = await apiServices.version.getVersionHistory(1, 10, false);
+      const response = await apiServices.version.getVersionHistory(
+        1,
+        10,
+        false,
+      );
       if (response.success && response.data) {
         setVersionHistory(response.data.versions);
       }
@@ -54,33 +57,89 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
     }
   };
 
-  const handleDownload = async () => {
-    if (!latestVersion?.downloadUrl) {
-      Alert.alert('提示', '暂无下载链接');
-      return;
-    }
+  const parseDownloadUrl = (downloadUrl: string) => {
+    if (!downloadUrl) return { url: '', password: '' };
 
-    try {
-      const supported = await Linking.canOpenURL(latestVersion.downloadUrl);
-      if (supported) {
-        await Linking.openURL(latestVersion.downloadUrl);
-      } else {
-        Alert.alert('错误', '无法打开下载链接');
-      }
-    } catch (error) {
-      console.error('打开下载链接失败:', error);
-      Alert.alert('错误', '打开下载链接失败');
-    }
+    // 解析格式: "https://wwoy.lanzouu.com/ihOd836y1mfc\n密码:123"
+    const parts = downloadUrl.split('\n');
+    const url = parts[0]?.trim() || '';
+    const passwordPart = parts[1]?.trim() || '';
+
+    // 提取密码，支持 "密码:123" 或 "密码：123" 格式
+    const passwordMatch = passwordPart.match(/密码[：:]\s*(.+)/);
+    const password = passwordMatch ? passwordMatch[1].trim() : '';
+
+    return { url, password };
   };
 
-  const handleCopyLink = () => {
-    if (!latestVersion?.downloadUrl) {
-      Alert.alert('提示', '暂无下载链接');
+  const handleCopyText = (text: string, type: string) => {
+    if (!text) {
+      toast({
+        title: `暂无${type}`,
+        preset: 'error',
+        duration: 2,
+      });
       return;
     }
 
-    Clipboard.setString(latestVersion.downloadUrl);
-    Alert.alert('成功', '下载链接已复制到剪贴板');
+    Clipboard.setString(text);
+    toast({
+      title: `${type}已复制`,
+      preset: 'done',
+      duration: 1.5,
+    });
+  };
+
+  const renderMarkdownText = (text: string) => {
+    if (!text) return null;
+
+    const lines = text.split('\n');
+    const elements: React.ReactNode[] = [];
+
+    lines.forEach((line, index) => {
+      const trimmedLine = line.trim();
+
+      if (!trimmedLine) {
+        // 空行
+        elements.push(<View key={index} style={styles.markdownSpacing} />);
+        return;
+      }
+
+      if (trimmedLine.startsWith('## ')) {
+        // 二级标题
+        elements.push(
+          <Text key={index} style={styles.markdownH2}>
+            {trimmedLine.substring(3)}
+          </Text>,
+        );
+      } else if (trimmedLine.startsWith('### ')) {
+        // 三级标题
+        elements.push(
+          <Text key={index} style={styles.markdownH3}>
+            {trimmedLine.substring(4)}
+          </Text>,
+        );
+      } else if (trimmedLine.startsWith('- ')) {
+        // 列表项
+        elements.push(
+          <View key={index} style={styles.markdownListItem}>
+            <Text style={styles.markdownListBullet}>•</Text>
+            <Text style={styles.markdownListText}>
+              {trimmedLine.substring(2)}
+            </Text>
+          </View>,
+        );
+      } else {
+        // 普通文本
+        elements.push(
+          <Text key={index} style={styles.markdownText}>
+            {trimmedLine}
+          </Text>,
+        );
+      }
+    });
+
+    return <View style={styles.markdownContainer}>{elements}</View>;
   };
 
   const formatDate = (dateString: string) => {
@@ -97,30 +156,45 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
   const getUpdateType = (version: string) => {
     const currentParts = currentVersion.split('.').map(Number);
     const versionParts = version.split('.').map(Number);
-    
+
     if (versionParts[0] > currentParts[0]) return '重大更新';
     if (versionParts[1] > currentParts[1]) return '功能更新';
     if (versionParts[2] > currentParts[2]) return '修复更新';
     return '更新';
   };
 
-  const renderVersionItem = (version: AppVersion, isLatest: boolean = false) => (
-    <View key={version.id} style={[styles.versionItem, isLatest && styles.latestVersionItem]}>
+  const renderVersionItem = (
+    version: AppVersion,
+    isLatest: boolean = false,
+  ) => (
+    <View
+      key={version.id}
+      style={[styles.versionItem, isLatest && styles.latestVersionItem]}
+    >
       <View style={styles.versionHeader}>
         <View style={styles.versionInfo}>
-          <Text style={[styles.versionNumber, isLatest && styles.latestVersionNumber]}>
+          <Text
+            style={[
+              styles.versionNumber,
+              isLatest && styles.latestVersionNumber,
+            ]}
+          >
             v{version.version}
             {isLatest && <Text style={styles.latestBadge}> 最新</Text>}
           </Text>
-          <Text style={styles.versionDate}>{formatDate(version.releaseDate)}</Text>
+          <Text style={styles.versionDate}>
+            {formatDate(version.releaseDate)}
+          </Text>
         </View>
         {isLatest && (
           <View style={styles.updateTypeBadge}>
-            <Text style={styles.updateTypeText}>{getUpdateType(version.version)}</Text>
+            <Text style={styles.updateTypeText}>
+              {getUpdateType(version.version)}
+            </Text>
           </View>
         )}
       </View>
-      <Text style={styles.releaseNotes}>{version.releaseNotes}</Text>
+      {renderMarkdownText(version.releaseNotes)}
     </View>
   );
 
@@ -151,25 +225,49 @@ const UpdateModal: React.FC<UpdateModalProps> = ({
                 </Text>
               </View>
 
+              {latestVersion.downloadUrl &&
+                (() => {
+                  const { url, password } = parseDownloadUrl(
+                    latestVersion.downloadUrl,
+                  );
+                  return (
+                    <View style={styles.downloadInfo}>
+                      <Text style={styles.downloadInfoTitle}>下载信息</Text>
+                      <Text style={styles.downloadInfoHint}>点击即可复制</Text>
+
+                      {url && (
+                        <TouchableOpacity
+                          style={styles.downloadInfoItem}
+                          onPress={() => handleCopyText(url, '下载地址')}
+                        >
+                          <Text style={styles.downloadInfoLabel}>
+                            下载地址:
+                          </Text>
+                          <Text
+                            style={styles.downloadInfoValue}
+                            numberOfLines={2}
+                          >
+                            {url}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {password && (
+                        <TouchableOpacity
+                          style={styles.downloadInfoItem}
+                          onPress={() => handleCopyText(password, '密码')}
+                        >
+                          <Text style={styles.downloadInfoLabel}>密码:</Text>
+                          <Text style={styles.downloadInfoValue}>
+                            {password}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })()}
+
               {renderVersionItem(latestVersion, true)}
-
-              <View style={styles.actionButtons}>
-                <TouchableOpacity
-                  style={styles.downloadButton}
-                  onPress={handleDownload}
-                  disabled={!latestVersion.downloadUrl}
-                >
-                  <Text style={styles.downloadButtonText}>立即下载</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.copyButton}
-                  onPress={handleCopyLink}
-                  disabled={!latestVersion.downloadUrl}
-                >
-                  <Text style={styles.copyButtonText}>复制链接</Text>
-                </TouchableOpacity>
-              </View>
             </>
           )}
 
@@ -266,6 +364,88 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#007AFF',
   },
+  downloadInfo: {
+    backgroundColor: '#f0f8ff',
+    padding: 16,
+    borderRadius: 12,
+    marginVertical: 16,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+  },
+  downloadInfoTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 4,
+  },
+  downloadInfoHint: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 12,
+  },
+  downloadInfoItem: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  downloadInfoLabel: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
+  },
+  downloadInfoValue: {
+    fontSize: 14,
+    color: '#007AFF',
+    lineHeight: 20,
+  },
+  markdownContainer: {
+    marginTop: 8,
+  },
+  markdownSpacing: {
+    height: 8,
+  },
+  markdownH2: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  markdownH3: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#555',
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  markdownText: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  markdownListItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+    paddingLeft: 8,
+  },
+  markdownListBullet: {
+    fontSize: 14,
+    color: '#666',
+    marginRight: 8,
+    marginTop: 2,
+  },
+  markdownListText: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    flex: 1,
+  },
   versionItem: {
     backgroundColor: '#fff',
     padding: 16,
@@ -321,37 +501,7 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
   },
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginVertical: 20,
-  },
-  downloadButton: {
-    flex: 1,
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  downloadButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  copyButton: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#007AFF',
-  },
-  copyButtonText: {
-    color: '#007AFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+
   historySection: {
     marginTop: 20,
   },

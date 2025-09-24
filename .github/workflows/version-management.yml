@@ -24,10 +24,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Get version information
         id: version_info
@@ -111,29 +107,70 @@ jobs:
         id: release_notes
         if: steps.version_info.outputs.should_sync == 'true'
         run: |
-          # 获取最近的提交信息作为发布说明
-          RECENT_COMMITS=$(git log --pretty=format:"- %s" --no-merges -10)
+          # 创建临时文件来处理复杂的 commit 解析
+          cat > parse_commits.sh << 'SCRIPT'
+          #!/bin/bash
+
+          # 获取最近的提交信息，过滤版本相关提交
+          git log --pretty=format:"%H" --no-merges -5 | while read commit_hash; do
+            # 获取 commit 的 subject 和 body
+            subject=$(git log --format="%s" -n 1 $commit_hash)
+            body=$(git log --format="%b" -n 1 $commit_hash)
+
+            # 跳过版本相关的提交
+            if [[ "$subject" =~ ^(version:|Version|v[0-9]) ]]; then
+              continue
+            fi
+
+            # 处理 conventional commits
+            if [[ "$subject" =~ ^(fix|feat|chore|docs|style|refactor|test|perf):[[:space:]]* ]]; then
+              # 提取描述部分（去掉类型前缀）
+              desc=$(echo "$subject" | sed 's/^[^:]*:[[:space:]]*//')
+              echo "- $desc"
+
+              # 处理 body 中的列表项
+              if [ -n "$body" ]; then
+                echo "$body" | while IFS= read -r line; do
+                  # 匹配以 "- " 开头的行
+                  if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
+                    # 清理并格式化为子项
+                    clean_item=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//')
+                    if [ -n "$clean_item" ]; then
+                      echo "  - $clean_item"
+                    fi
+                  fi
+                done
+              fi
+            else
+              # 非 conventional commit，直接使用 subject
+              echo "- $subject"
+            fi
+          done
+          SCRIPT
+
+          chmod +x parse_commits.sh
+          FORMATTED_COMMITS=$(./parse_commits.sh)
 
           # 如果没有提交，使用默认消息
-          if [ -z "$RECENT_COMMITS" ]; then
-            RECENT_COMMITS="- 版本更新和bug修复"
+          if [ -z "$FORMATTED_COMMITS" ]; then
+            FORMATTED_COMMITS="- 版本更新和bug修复"
           fi
 
-          # 创建发布说明
-          RELEASE_NOTES="## 版本 ${{ steps.version_info.outputs.version }}
+          # 创建发布说明，确保换行格式正确
+          echo "## 版本 ${{ steps.version_info.outputs.version }}" > release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 更新内容" >> release_notes.txt
+          echo -e "$FORMATTED_COMMITS" >> release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 发布时间" >> release_notes.txt
+          echo "$(date '+%Y-%m-%d %H:%M:%S')" >> release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 版本类型" >> release_notes.txt
+          echo "${{ steps.update_type.outputs.update_type }} 更新" >> release_notes.txt
 
-          ### 更新内容
-          $RECENT_COMMITS
-
-          ### 发布时间
-          $(date '+%Y-%m-%d %H:%M:%S')
-
-          ### 版本类型
-          ${{ steps.update_type.outputs.update_type }} 更新"
-
-          # 保存到文件，避免特殊字符问题
-          echo "$RELEASE_NOTES" > release_notes.txt
           echo "Release notes generated"
+          echo "Generated content:"
+          cat release_notes.txt
 
       - name: Push version to backend
         if: steps.version_info.outputs.should_sync == 'true'

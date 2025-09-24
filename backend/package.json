@@ -15,8 +15,7 @@
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:seed:prod": "node dist/db/seed.js",
     "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
-    "clean": "rimraf dist"
+    "lint:fix": "eslint . --ext .ts --fix"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.3",
@@ -42,7 +41,6 @@
     "@typescript-eslint/parser": "^7.16.0",
     "cross-env": "^10.0.0",
     "eslint": "^8.57.0",
-    "rimraf": "^6.0.1",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
   },

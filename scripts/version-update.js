@@ -80,25 +80,25 @@ async function main() {
 
     console.log(`✅ 版本已更新: ${currentVersion} -> ${newVersion}`);
 
-    // 如果是主版本或次版本更新，使用react-native-version更新原生版本
-    if (versionType === 'major' || versionType === 'minor') {
-      console.log('🔄 更新原生应用版本...');
-      try {
-        // 检查是否安装了react-native-version
-        execSync('npx react-native-version --help', { stdio: 'ignore' });
+    // 如果是主版本或次版本更新，使用react-native-version更新原生版本(改为通通更新)
+    // if (versionType === 'major' || versionType === 'minor') {
+    console.log('🔄 更新原生应用版本...');
+    try {
+      // 检查是否安装了react-native-version
+      execSync('npx react-native-version --help', { stdio: 'ignore' });
 
-        // 更新原生版本
-        execSync('npx react-native-version --never-amend', {
-          stdio: 'inherit',
-        });
-        console.log('✅ 原生应用版本已更新');
-      } catch (error) {
-        console.warn(
-          '⚠️  警告: 无法更新原生版本，请确保安装了react-native-version',
-        );
-        console.log('可以运行: npm install -g react-native-version');
-      }
+      // 更新原生版本
+      execSync('npx react-native-version --never-amend', {
+        stdio: 'inherit',
+      });
+      console.log('✅ 原生应用版本已更新');
+    } catch (error) {
+      console.warn(
+        '⚠️  警告: 无法更新原生版本，请确保安装了react-native-version',
+      );
+      console.log('可以运行: npm install -g react-native-version');
     }
+    // }
 
     // 生成版本代码
     const versionParts = newVersion.split('.').map(Number);
