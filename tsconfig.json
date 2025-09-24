@@ -1,0 +1,35 @@
+{
+  /* 继承官方最新 RN 规则，后续升级 React-Native 无需改动 */
+  "extends": "@react-native/typescript-config",
+
+  /* 让 TS 识别全局 .ts/.tsx */
+  "include": ["src/**/*", "*.ts", "*.tsx"],
+  "exclude": ["node_modules", "android", "ios", "**/Pods"],
+
+  "compilerOptions": {
+    /* === 路径别名（全局 @ 指向 src）=== */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    /* === 自动索引子导出，告别「找不到模块」=== */
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+
+    /* === 严格检查（可按需要逐条关闭）=== */
+    // "strict": true,
+    // "noImplicitAny": true,
+    // "strictNullChecks": true,
+
+    /* === 兼容老库，允许 JS 文件被 import === */
+    "allowJs": true,
+    "checkJs": false,
+
+    /* === 提升 IDE 体验 === */
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}
