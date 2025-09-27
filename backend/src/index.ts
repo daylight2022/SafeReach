@@ -22,7 +22,7 @@ import versionsRouter from './routes/versions.js';
 
 // 导入工具
 import { successResponse, errorResponse } from './utils/response.js';
-import ReminderScheduler from './services/reminderScheduler.js';
+// import ReminderScheduler from './services/reminderScheduler.js'; // 已移除，使用独立的cron进程
 
 // 加载环境变量
 config();
@@ -251,20 +251,17 @@ app.onError((err, c) => {
   return errorResponse(c, '服务器内部错误', 500);
 });
 
-// 启动定时任务
-const scheduler = ReminderScheduler.getInstance();
-scheduler.start();
+// 定时任务已移至独立的cron进程 (safereach-cron)
+// 避免在集群模式下重复执行
 
 // 优雅关闭处理
 process.on('SIGINT', () => {
   console.log('\n🛑 接收到 SIGINT 信号，正在关闭服务...');
-  scheduler.stop();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.log('\n🛑 接收到 SIGTERM 信号，正在关闭服务...');
-  scheduler.stop();
   process.exit(0);
 });
 

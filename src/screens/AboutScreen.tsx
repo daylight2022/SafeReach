@@ -8,6 +8,7 @@ import {
   Linking,
   Dimensions,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import LinearGradient from 'react-native-linear-gradient';
@@ -16,6 +17,8 @@ import { COLORS } from '@/utils/constants';
 import { toast } from 'burnt';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { getAppVersionWithPrefix, getAppBuildNumber } from '@/utils/version';
+import useVersionCheck from '@/hooks/useVersionCheck';
+import UpdateModal from '@/components/UpdateModal';
 
 const { width } = Dimensions.get('window');
 
@@ -34,6 +37,17 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
     description:
       '专为企业设计的在外人员联系管理系统，帮助管理者及时了解员工动态，提醒注意事项，确保人员稳定安全。',
   });
+
+  // 使用版本检查 hook
+  const {
+    hasUpdate,
+    latestVersion,
+    currentVersion,
+    isChecking,
+    showUpdateModal,
+    checkForUpdates,
+    dismissUpdate,
+  } = useVersionCheck();
 
   // 获取应用版本信息
   useEffect(() => {
@@ -99,14 +113,27 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
     avatar: 'user-circle',
   };
 
-  const handleCheckUpdate = () => {
-    setTimeout(() => {
+  const handleCheckUpdate = async () => {
+    try {
+      await checkForUpdates();
+
+      // 如果没有更新，显示提示
+      if (!hasUpdate) {
+        toast({
+          title: '已是最新版本',
+          preset: 'done',
+          duration: 2,
+        });
+      }
+      // 如果有更新，showUpdateModal 会自动变为 true，UpdateModal 会显示
+    } catch (error) {
+      console.error('检查更新失败:', error);
       toast({
-        title: '已是最新版本',
-        preset: 'done',
+        title: '检查更新失败',
+        preset: 'error',
         duration: 2,
       });
-    }, 1000);
+    }
   };
 
   const handleContact = (type: string) => {
@@ -172,16 +199,23 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.appDescription}>{appInfo.description}</Text>
 
           <TouchableOpacity
-            style={styles.updateButton}
+            style={[styles.updateButton, isChecking && styles.updateButtonDisabled]}
             onPress={handleCheckUpdate}
             activeOpacity={0.85}
+            disabled={isChecking}
           >
             <LinearGradient
               colors={['#F0F9FF', '#E0F2FE']}
               style={styles.updateGradient}
             >
-              <Icon name="refresh" size={16} color={COLORS.primary} />
-              <Text style={styles.updateText}>检查更新</Text>
+              {isChecking ? (
+                <ActivityIndicator size="small" color={COLORS.primary} />
+              ) : (
+                <Icon name="refresh" size={16} color={COLORS.primary} />
+              )}
+              <Text style={styles.updateText}>
+                {isChecking ? '检查中...' : '检查更新'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -371,6 +405,14 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* 版本更新弹框 */}
+      <UpdateModal
+        visible={showUpdateModal}
+        onClose={dismissUpdate}
+        latestVersion={latestVersion || undefined}
+        currentVersion={currentVersion}
+      />
     </View>
   );
 };
@@ -477,6 +519,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.primary,
+  },
+  updateButtonDisabled: {
+    opacity: 0.6,
   },
   developerSection: {
     paddingHorizontal: 20,

@@ -56,7 +56,7 @@ module.exports = {
       script: 'scripts/reminder-cron.js',
       instances: 1,
       exec_mode: 'fork',
-      cron_restart: '0 1 * * *', // 每天凌晨1点重启一次
+      // 移除 cron_restart，避免与脚本内部定时任务冲突
       env: {
         NODE_ENV: 'production',
       },

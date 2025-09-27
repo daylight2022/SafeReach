@@ -15,6 +15,8 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { persons, leaves, reminders, reminderSettings } from '../src/db/schema.js';
+import fs from 'fs';
+import path from 'path';
 
 // 加载环境变量
 config();
@@ -28,6 +30,58 @@ if (!connectionString) {
 
 const client = postgres(connectionString);
 const db = drizzle(client);
+
+// 进程锁文件路径
+const LOCK_FILE = path.join(process.cwd(), 'reminder-cron.lock');
+
+/**
+ * 检查并创建进程锁
+ */
+function acquireLock() {
+  try {
+    if (fs.existsSync(LOCK_FILE)) {
+      const lockContent = fs.readFileSync(LOCK_FILE, 'utf8');
+      const lockData = JSON.parse(lockContent);
+      const lockTime = new Date(lockData.timestamp);
+      const now = new Date();
+
+      // 如果锁文件超过1小时，认为是僵尸锁，删除它
+      if (now.getTime() - lockTime.getTime() > 60 * 60 * 1000) {
+        console.log('🧹 检测到僵尸锁文件，正在清理...');
+        fs.unlinkSync(LOCK_FILE);
+      } else {
+        console.log('❌ 另一个提醒任务正在执行中，退出...');
+        process.exit(0);
+      }
+    }
+
+    // 创建锁文件
+    const lockData = {
+      pid: process.pid,
+      timestamp: new Date().toISOString()
+    };
+    fs.writeFileSync(LOCK_FILE, JSON.stringify(lockData));
+    console.log(`🔒 已获取进程锁 (PID: ${process.pid})`);
+    return true;
+  } catch (error) {
+    console.error('❌ 获取进程锁失败:', error);
+    return false;
+  }
+}
+
+/**
+ * 释放进程锁
+ */
+function releaseLock() {
+  try {
+    if (fs.existsSync(LOCK_FILE)) {
+      fs.unlinkSync(LOCK_FILE);
+      console.log('🔓 已释放进程锁');
+    }
+  } catch (error) {
+    console.error('❌ 释放进程锁失败:', error);
+  }
+}
 
 /**
  * 更新休假状态（将已结束的休假标记为completed）
@@ -214,9 +268,14 @@ async function processContactReminders(currentDate) {
  * 主执行函数
  */
 async function main() {
+  // 获取进程锁
+  if (!acquireLock()) {
+    process.exit(1);
+  }
+
   const currentDate = new Date().toISOString().split('T')[0];
   const startTime = new Date();
-  
+
   console.log(`🔔 开始执行提醒更新任务 - ${startTime.toISOString()}`);
   console.log(`📅 当前日期: ${currentDate}`);
 
@@ -237,20 +296,18 @@ async function main() {
     // 4. 处理基于阈值的联系提醒
     const reminderCount = await processContactReminders(currentDate);
 
-    // 5. 清理过期的系统日志记录（保留最近7天）
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    
+    // 5. 清理过期的提醒记录（保留最近30天的数据用于统计分析）
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
     const cleanupResult = await db
       .delete(reminders)
       .where(
-        and(
-          eq(reminders.reminderType, 'system'),
-          sql`${reminders.reminderDate} < ${sevenDaysAgo.toISOString().split('T')[0]}`
-        )
+        sql`${reminders.reminderDate} < ${thirtyDaysAgoStr}`
       );
 
-    console.log(`🧹 清理过期系统日志: ${cleanupResult.rowCount || 0} 条`);
+    console.log(`🧹 清理30天前的过期提醒记录: ${cleanupResult.rowCount || 0} 条`);
 
     // 6. 记录执行日志
     await db.insert(reminders).values({
@@ -274,6 +331,8 @@ async function main() {
     console.error('❌ 提醒更新任务执行失败:', error);
     process.exit(1);
   } finally {
+    // 释放进程锁
+    releaseLock();
     // 关闭数据库连接
     await client.end();
   }
