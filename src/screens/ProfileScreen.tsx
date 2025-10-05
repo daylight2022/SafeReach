@@ -12,7 +12,6 @@ import Icon from 'react-native-vector-icons/FontAwesome';
 import { NavigationProp } from '@react-navigation/native';
 import {
   userService,
-  statisticsService,
   departmentService,
 } from '@/services/apiServices';
 import { COLORS } from '@/utils/constants';
@@ -30,15 +29,9 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [user, setUser] = useState<User | null>(null);
   const [departmentName, setDepartmentName] = useState<string>('');
   const [appVersion, setAppVersion] = useState<string>('v1.0.0');
-  const [statistics, setStatistics] = useState({
-    activePersons: 0,       // 在假人数
-    monthlyContacts: 0,     // 本月联系次数
-    onTimeRate: 0,          // 及时处理率
-  });
 
   useEffect(() => {
     loadUserData();
-    loadStatistics();
     loadVersionInfo();
   }, []);
 
@@ -81,42 +74,6 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
       }
     } catch (error) {
       console.error('Load user data error:', error);
-    }
-  };
-
-  const loadStatistics = async () => {
-    try {
-      // 计算本月时间范围
-      const now = new Date();
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-      const startDate = startOfMonth.toISOString().split('T')[0];
-      const endDate = now.toISOString().split('T')[0];
-
-      // 使用统计服务获取本月数据
-      const result = await statisticsService.getStatistics(startDate, endDate);
-
-      if (result.success && result.data) {
-        setStatistics({
-          activePersons: result.data.activePersons || 0,
-          monthlyContacts: result.data.totalContacts || 0,
-          onTimeRate: result.data.responseMetrics?.onTimeRate || 0,
-        });
-      } else {
-        // 如果统计服务失败，设置默认值
-        setStatistics({
-          activePersons: 0,
-          monthlyContacts: 0,
-          onTimeRate: 0,
-        });
-      }
-    } catch (error) {
-      console.error('Load statistics error:', error);
-      // 设置默认值
-      setStatistics({
-        activePersons: 0,
-        monthlyContacts: 0,
-        onTimeRate: 0,
-      });
     }
   };
 
@@ -210,48 +167,26 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         <LinearGradient colors={COLORS.primaryGradient} style={styles.header}>
           <View style={styles.profileInfo}>
             <View style={styles.avatar}>
-              <Icon name="user" size={32} color={COLORS.white} />
+              <Icon name="user" size={40} color={COLORS.white} />
             </View>
-            <View style={styles.userInfo}>
-              <Text style={styles.name}>{user?.realName || '联系员'}</Text>
-              <Text style={styles.role}>
-                {departmentName || '技术部'} ·{' '}
-                {user?.role === 'liaison' ? '联系员' : '管理员'}
-              </Text>
-            </View>
-            <View style={styles.headerAction}>
-              <Icon name="chevron-right" size={16} color={COLORS.white} />
+            <Text style={styles.name}>{user?.realName || '联系员'}</Text>
+            <Text style={styles.role}>
+              {departmentName || '技术部'} ·{' '}
+              {user?.role === 'liaison' ? '联系员' : '管理员'}
+            </Text>
+            <View style={styles.editButton}>
+              <Icon name="edit" size={14} color={COLORS.white} />
+              <Text style={styles.editButtonText}>编辑资料</Text>
             </View>
           </View>
           {/* 装饰性元素 */}
-          {/* <View style={styles.decoration1} />
-          <View style={styles.decoration2} /> */}
+          <View style={styles.decoration1} />
+          <View style={styles.decoration2} />
+          <View style={styles.decoration3} />
         </LinearGradient>
       </TouchableOpacity>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* 统计卡片 */}
-        <View style={styles.statsCard}>
-          <View style={styles.statsItem}>
-            <Text style={[styles.statsValue, { color: COLORS.primary }]}>
-              {statistics.activePersons}
-            </Text>
-            <Text style={styles.statsLabel}>在假人数</Text>
-          </View>
-          <View style={styles.statsItem}>
-            <Text style={[styles.statsValue, { color: COLORS.success }]}>
-              {statistics.monthlyContacts}
-            </Text>
-            <Text style={styles.statsLabel}>本月联系</Text>
-          </View>
-          <View style={styles.statsItem}>
-            <Text style={[styles.statsValue, { color: COLORS.warning }]}>
-              {statistics.onTimeRate}%
-            </Text>
-            <Text style={styles.statsLabel}>及时处理率</Text>
-          </View>
-        </View>
-
         {/* 功能菜单 */}
         <View style={styles.menuSection}>
           {menuItems.map((item, index) => (
@@ -304,98 +239,93 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray,
   },
   header: {
-    paddingTop: 48,
-    paddingBottom: 48,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+    paddingTop: 60,
+    paddingBottom: 60,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    overflow: 'hidden',
+    position: 'relative',
   },
   headerContainer: {
     // 无需额外样式，TouchableOpacity 会处理点击
   },
   profileInfo: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 20,
   },
-  userInfo: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  headerAction: {
-    padding: 8,
-  },
   avatar: {
-    width: 80,
-    height: 80,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 16,
+    width: 100,
+    height: 100,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   name: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: 'bold',
     color: COLORS.white,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   role: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.9)',
+    marginBottom: 16,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+  },
+  editButtonText: {
     fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
+    color: COLORS.white,
+    fontWeight: '500',
   },
   decoration1: {
     position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    top: -50,
+    right: -50,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   decoration2: {
     position: 'absolute',
-    bottom: -20,
-    left: -20,
+    bottom: -30,
+    left: -40,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  decoration3: {
+    position: 'absolute',
+    top: 40,
+    left: -30,
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   content: {
     flex: 1,
     paddingHorizontal: 16,
-    marginTop: -32,
-  },
-  statsCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  statsItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statsValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  statsLabel: {
-    fontSize: 12,
-    color: COLORS.darkGray,
-    marginTop: 4,
+    marginTop: -40,
   },
   menuSection: {
     backgroundColor: COLORS.white,
     borderRadius: 16,
     overflow: 'hidden',
+    marginTop: 16,
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },

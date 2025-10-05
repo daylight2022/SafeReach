@@ -12,7 +12,12 @@ if (!connectionString) {
 }
 
 // 创建 PostgreSQL 连接
-const client = postgres(connectionString, {
+// 在连接字符串中添加时区参数，确保使用东八区时间
+const connectionWithTimezone = connectionString.includes('?')
+  ? `${connectionString}&options=-c timezone=Asia/Shanghai`
+  : `${connectionString}?options=-c timezone=Asia/Shanghai`;
+
+const client = postgres(connectionWithTimezone, {
   max: 10, // 最大连接数
   idle_timeout: 20, // 空闲超时时间（秒）
   connect_timeout: 10, // 连接超时时间（秒）

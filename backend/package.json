@@ -14,6 +14,9 @@
     "db:seed": "tsx src/db/seed.ts",
     "db:migrate:prod": "node dist/db/migrate.js",
     "db:seed:prod": "node dist/db/seed.js",
+    "cron:dev": "cross-env NODE_ENV=development tsx scripts/reminder-cron.js",
+    "cron:prod": "node scripts/reminder-cron.js",
+    "cron:once": "node scripts/reminder-cron.js",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix"
   },
@@ -39,7 +42,7 @@
     "@types/node": "^20.14.10",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
-    "cross-env": "^10.0.0",
+    "cross-env": "^10.1.0",
     "eslint": "^8.57.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"

@@ -332,7 +332,7 @@ async function seedDatabase() {
           annualLeaveUsed: 15,
           annualLeaveTimes: 2,
           notes: '2部员工，即将休假',
-          lastContactDate: '2025-09-15',
+          lastContactDate: '2025-10-04',
           lastContactBy: insertedUsers[3].id, // 联络员2-1
           createdBy: insertedUsers[1].id, // 操作员2-1
         },
@@ -347,7 +347,7 @@ async function seedDatabase() {
           annualLeaveUsed: 8,
           annualLeaveTimes: 1,
           notes: '2部员工，正在休假中',
-          lastContactDate: '2025-09-16',
+          lastContactDate: '2025-10-03',
           lastContactBy: insertedUsers[4].id, // 联络员2-2
           createdBy: insertedUsers[2].id, // 操作员2-2
         },
@@ -363,7 +363,7 @@ async function seedDatabase() {
           annualLeaveUsed: 12,
           annualLeaveTimes: 2,
           notes: '5组员工，即将结束休假',
-          lastContactDate: '2025-09-17',
+          lastContactDate: '2025-10-04',
           lastContactBy: insertedUsers[7].id, // 联络员5-1
           createdBy: insertedUsers[5].id, // 操作员5-1
         },
@@ -378,7 +378,7 @@ async function seedDatabase() {
           annualLeaveUsed: 20,
           annualLeaveTimes: 3,
           notes: '5组组长，长期休假中',
-          lastContactDate: '2025-09-10',
+          lastContactDate: '2025-09-28',
           lastContactBy: insertedUsers[8].id, // 联络员5-2
           createdBy: insertedUsers[6].id, // 操作员5-2
         },
@@ -394,7 +394,7 @@ async function seedDatabase() {
           annualLeaveUsed: 3,
           annualLeaveTimes: 1,
           notes: '6组员工，短期休假',
-          lastContactDate: '2025-09-18',
+          lastContactDate: '2025-10-05',
           lastContactBy: insertedUsers[11].id, // 联络员6-1
           createdBy: insertedUsers[9].id, // 操作员6-1
         },
@@ -409,7 +409,7 @@ async function seedDatabase() {
           annualLeaveUsed: 0,
           annualLeaveTimes: 0,
           notes: '6组实习生，准备休假',
-          lastContactDate: '2025-09-17',
+          lastContactDate: '2025-10-04',
           lastContactBy: insertedUsers[12].id, // 联络员6-2
           createdBy: insertedUsers[10].id, // 操作员6-2
         },
@@ -425,7 +425,7 @@ async function seedDatabase() {
           annualLeaveUsed: 25,
           annualLeaveTimes: 4,
           notes: '7组员工，休假频繁',
-          lastContactDate: '2025-09-12',
+          lastContactDate: '2025-09-28',
           lastContactBy: insertedUsers[15].id, // 联络员7-1
           createdBy: insertedUsers[13].id, // 操作员7-1
         },
@@ -441,7 +441,7 @@ async function seedDatabase() {
           annualLeaveUsed: 18,
           annualLeaveTimes: 2,
           notes: '8组组长，管理规范',
-          lastContactDate: '2025-09-14',
+          lastContactDate: '2025-10-03',
           lastContactBy: insertedUsers[19].id, // 联络员8-1
           createdBy: insertedUsers[17].id, // 操作员8-1
         },
@@ -460,8 +460,8 @@ async function seedDatabase() {
           personId: insertedPersons[0].id,
           leaveType: 'vacation',
           location: '河南省郑州市二七区郑密路黄岗寺小区',
-          startDate: '2025-09-19',
-          endDate: '2025-10-09',
+          startDate: '2025-10-06',
+          endDate: '2025-10-26',
           days: 21,
           status: 'active',
           createdBy: insertedUsers[1].id, // 操作员2-1
@@ -471,9 +471,9 @@ async function seedDatabase() {
           personId: insertedPersons[1].id,
           leaveType: 'vacation',
           location: '湖南长沙',
-          startDate: '2025-09-15',
-          endDate: '2025-09-22',
-          days: 8,
+          startDate: '2025-10-01',
+          endDate: '2025-10-10',
+          days: 10,
           status: 'active',
           createdBy: insertedUsers[2].id, // 操作员2-2
         },
@@ -482,9 +482,9 @@ async function seedDatabase() {
           personId: insertedPersons[2].id,
           leaveType: 'vacation',
           location: '广东深圳',
-          startDate: '2025-09-10',
-          endDate: '2025-09-19',
-          days: 10,
+          startDate: '2025-10-01',
+          endDate: '2025-10-06',
+          days: 6,
           status: 'active',
           createdBy: insertedUsers[5].id, // 操作员5-1
         },
@@ -493,9 +493,9 @@ async function seedDatabase() {
           personId: insertedPersons[3].id,
           leaveType: 'vacation',
           location: '北京市朝阳区',
-          startDate: '2025-09-01',
-          endDate: '2025-09-30',
-          days: 30,
+          startDate: '2025-09-25',
+          endDate: '2025-10-25',
+          days: 31,
           status: 'active',
           createdBy: insertedUsers[6].id, // 操作员5-2
         },
@@ -504,8 +504,8 @@ async function seedDatabase() {
           personId: insertedPersons[4].id,
           leaveType: 'vacation',
           location: '江苏南京',
-          startDate: '2025-09-18',
-          endDate: '2025-09-20',
+          startDate: '2025-10-05',
+          endDate: '2025-10-07',
           days: 3,
           status: 'active',
           createdBy: insertedUsers[9].id, // 操作员6-1
@@ -515,8 +515,8 @@ async function seedDatabase() {
           personId: insertedPersons[5].id,
           leaveType: 'vacation',
           location: '四川成都',
-          startDate: '2025-09-20',
-          endDate: '2025-09-27',
+          startDate: '2025-10-07',
+          endDate: '2025-10-14',
           days: 8,
           status: 'active',
           createdBy: insertedUsers[10].id, // 操作员6-2
@@ -526,8 +526,8 @@ async function seedDatabase() {
           personId: insertedPersons[6].id,
           leaveType: 'vacation',
           location: '浙江杭州',
-          startDate: '2025-09-05',
-          endDate: '2025-09-12',
+          startDate: '2025-09-20',
+          endDate: '2025-09-27',
           days: 8,
           status: 'completed',
           createdBy: insertedUsers[13].id, // 操作员7-1
@@ -537,8 +537,8 @@ async function seedDatabase() {
           personId: insertedPersons[7].id,
           leaveType: 'business',
           location: '上海市浦东新区',
-          startDate: '2025-09-16',
-          endDate: '2025-09-20',
+          startDate: '2025-10-03',
+          endDate: '2025-10-07',
           days: 5,
           status: 'active',
           createdBy: insertedUsers[17].id, // 操作员8-1
@@ -548,8 +548,8 @@ async function seedDatabase() {
           personId: insertedPersons[0].id,
           leaveType: 'vacation',
           location: '海南三亚',
-          startDate: '2025-07-01',
-          endDate: '2025-07-15',
+          startDate: '2025-08-01',
+          endDate: '2025-08-15',
           days: 15,
           status: 'completed',
           createdBy: insertedUsers[1].id, // 操作员2-1
@@ -567,7 +567,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[0].id, // 张三
           leaveId: insertedLeaves[0].id,
-          contactDate: new Date('2025-09-15T10:00:00'),
+          contactDate: new Date('2025-10-04T10:00:00'),
           contactBy: insertedUsers[3].id, // 联络员2-1
           contactMethod: 'phone',
           notes: '确认明日休假安排，已联系第三方联系人',
@@ -575,7 +575,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[1].id, // 李四
           leaveId: insertedLeaves[1].id,
-          contactDate: new Date('2025-09-16T14:30:00'),
+          contactDate: new Date('2025-10-03T14:30:00'),
           contactBy: insertedUsers[4].id, // 联络员2-2
           contactMethod: 'message',
           notes: '休假期间短信联系，一切正常',
@@ -583,7 +583,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[2].id, // 王五
           leaveId: insertedLeaves[2].id,
-          contactDate: new Date('2025-09-17T09:15:00'),
+          contactDate: new Date('2025-10-04T09:15:00'),
           contactBy: insertedUsers[7].id, // 联络员5-1
           contactMethod: 'phone',
           notes: '确认明日返程安排',
@@ -591,7 +591,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[3].id, // 赵六
           leaveId: insertedLeaves[3].id,
-          contactDate: new Date('2025-09-10T16:20:00'),
+          contactDate: new Date('2025-09-28T16:20:00'),
           contactBy: insertedUsers[8].id, // 联络员5-2
           contactMethod: 'visit',
           notes: '长期休假期间实地探访',
@@ -599,7 +599,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[4].id, // 孙七
           leaveId: insertedLeaves[4].id,
-          contactDate: new Date('2025-09-18T08:00:00'),
+          contactDate: new Date('2025-10-05T08:00:00'),
           contactBy: insertedUsers[11].id, // 联络员6-1
           contactMethod: 'phone',
           notes: '今日开始休假，电话确认安全到达',
@@ -607,7 +607,7 @@ async function seedDatabase() {
         {
           personId: insertedPersons[7].id, // 郑十
           leaveId: insertedLeaves[7].id,
-          contactDate: new Date('2025-09-16T11:30:00'),
+          contactDate: new Date('2025-10-03T11:30:00'),
           contactBy: insertedUsers[19].id, // 联络员8-1
           contactMethod: 'phone',
           notes: '出差期间工作汇报',
@@ -627,8 +627,8 @@ async function seedDatabase() {
           personId: insertedPersons[0].id,
           leaveId: insertedLeaves[0].id,
           reminderType: 'before',
-          reminderDate: '2025-09-18',
-          priority: 'high',
+          reminderDate: '2025-10-05',
+          priority: 'medium',
           isHandled: false,
         },
         // 李四 - 休假中提醒
@@ -636,7 +636,7 @@ async function seedDatabase() {
           personId: insertedPersons[1].id,
           leaveId: insertedLeaves[1].id,
           reminderType: 'during',
-          reminderDate: '2025-09-18',
+          reminderDate: '2025-10-05',
           priority: 'medium',
           isHandled: false,
         },
@@ -645,16 +645,16 @@ async function seedDatabase() {
           personId: insertedPersons[2].id,
           leaveId: insertedLeaves[2].id,
           reminderType: 'ending',
-          reminderDate: '2025-09-18',
-          priority: 'high',
+          reminderDate: '2025-10-05',
+          priority: 'medium',
           isHandled: false,
         },
-        // 赵六 - 长期休假超期提醒
+        // 赵六 - 长期休假超期提醒（7天未联系）
         {
           personId: insertedPersons[3].id,
           leaveId: insertedLeaves[3].id,
           reminderType: 'overdue',
-          reminderDate: '2025-09-18',
+          reminderDate: '2025-10-05',
           priority: 'high',
           isHandled: false,
         },
@@ -663,18 +663,18 @@ async function seedDatabase() {
           personId: insertedPersons[4].id,
           leaveId: insertedLeaves[4].id,
           reminderType: 'before',
-          reminderDate: '2025-09-18',
+          reminderDate: '2025-10-05',
           priority: 'medium',
           isHandled: true,
           handledBy: insertedUsers[11].id, // 联络员6-1
-          handledAt: new Date('2025-09-18T08:00:00'),
+          handledAt: new Date('2025-10-05T08:00:00'),
         },
-        // 周八 - 即将休假提醒
+        // 周八 - 即将休假提醒（明日）
         {
           personId: insertedPersons[5].id,
           leaveId: insertedLeaves[5].id,
           reminderType: 'before',
-          reminderDate: '2025-09-19',
+          reminderDate: '2025-10-06',
           priority: 'medium',
           isHandled: false,
         },
@@ -683,7 +683,7 @@ async function seedDatabase() {
           personId: insertedPersons[7].id,
           leaveId: insertedLeaves[7].id,
           reminderType: 'during',
-          reminderDate: '2025-09-18',
+          reminderDate: '2025-10-05',
           priority: 'low',
           isHandled: false,
         },

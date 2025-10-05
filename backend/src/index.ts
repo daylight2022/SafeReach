@@ -22,7 +22,6 @@ import versionsRouter from './routes/versions.js';
 
 // 导入工具
 import { successResponse, errorResponse } from './utils/response.js';
-// import ReminderScheduler from './services/reminderScheduler.js'; // 已移除，使用独立的cron进程
 
 // 加载环境变量
 config();

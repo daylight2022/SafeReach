@@ -10,14 +10,12 @@ import {
   serverErrorResponse,
 } from '../utils/response.js';
 import { convertDbToApi } from '../utils/fieldMapping.js';
-import ReminderScheduler from '../services/reminderScheduler.js';
 import { z } from 'zod';
 
 const reminderSettingsRouter = new Hono();
 
-// 所有路由都需要认证，且只有管理员可以访问提醒设置
+// 所有路由都需要认证
 reminderSettingsRouter.use('*', authMiddleware);
-reminderSettingsRouter.use('*', requireAdmin);
 
 // 提醒设置验证schema
 const ReminderSettingsSchema = z.object({
@@ -75,9 +73,11 @@ reminderSettingsRouter.get('/', async c => {
 /**
  * 更新用户的提醒设置
  * PUT /reminder-settings
+ * 需要管理员权限
  */
 reminderSettingsRouter.put(
   '/',
+  requireAdmin,
   validateBody(ReminderSettingsSchema),
   async c => {
     try {
@@ -163,32 +163,6 @@ reminderSettingsRouter.get('/system-defaults', async c => {
     });
   } catch (error) {
     console.error('获取系统默认设置失败:', error);
-    return serverErrorResponse(c, error);
-  }
-});
-
-/**
- * 手动触发提醒更新任务
- * POST /reminder-settings/trigger-update
- */
-reminderSettingsRouter.post('/trigger-update', async c => {
-  try {
-    const currentUser = c.get('user');
-
-    // 只有管理员可以手动触发
-    if (currentUser.role !== 'admin') {
-      return errorResponse(c, '权限不足', 403);
-    }
-
-    const scheduler = ReminderScheduler.getInstance();
-    await scheduler.executeManually();
-
-    return successResponse(c, {
-      message: '提醒更新任务执行完成',
-      executedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error('手动触发提醒更新失败:', error);
     return serverErrorResponse(c, error);
   }
 });

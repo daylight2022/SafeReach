@@ -10,10 +10,9 @@ import {
   gte,
   inArray,
   isNotNull,
-  sql,
 } from 'drizzle-orm';
 import { db } from '../db/connection.js';
-import { persons, users, leaves, contacts, departments } from '../db/schema.js';
+import { persons, users, leaves, contacts, departments, reminders } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
   validateBody,
@@ -119,24 +118,31 @@ personsRouter.get('/', validateQuery(PersonQuerySchema), async c => {
     // 获取当前日期
     const currentDate = new Date().toISOString().split('T')[0];
 
-    // 获取总数（只计算有活跃休假且未结束的人员）
+    // 构建子查询：只选择有活跃休假的人员
+    const personsWithActiveLeaves = db
+      .selectDistinct({ personId: leaves.personId })
+      .from(leaves)
+      .where(
+        and(
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, currentDate),
+        ),
+      );
+
+    // 获取总数（只包含有活跃休假的人员）
     const [{ total }] = await db
       .select({ total: count() })
       .from(persons)
       .where(
-        and(
-          whereClause,
-          // 只包含有活跃休假且休假未结束的人员
-          sql`EXISTS (
-            SELECT 1 FROM ${leaves} l
-            WHERE l.person_id = ${persons.id}
-            AND l.status = 'active'
-            AND l.end_date >= ${currentDate}
-          )`,
-        ),
+        whereClause
+          ? and(
+              whereClause,
+              inArray(persons.id, personsWithActiveLeaves),
+            )
+          : inArray(persons.id, personsWithActiveLeaves),
       );
 
-    // 获取人员列表（包含创建者信息），只包含有活跃休假的人员
+    // 获取人员列表（只包含有活跃休假的人员，包含创建者信息）
     const personList = await db
       .select({
         id: persons.id,
@@ -168,25 +174,21 @@ personsRouter.get('/', validateQuery(PersonQuerySchema), async c => {
       .leftJoin(users, eq(persons.createdBy, users.id))
       .leftJoin(departments, eq(persons.departmentId, departments.id))
       .where(
-        and(
-          whereClause,
-          // 只包含有活跃休假且休假未结束的人员
-          sql`EXISTS (
-            SELECT 1 FROM ${leaves} l
-            WHERE l.person_id = ${persons.id}
-            AND l.status = 'active'
-            AND l.end_date >= ${currentDate}
-          )`,
-        ),
+        whereClause
+          ? and(
+              whereClause,
+              inArray(persons.id, personsWithActiveLeaves),
+            )
+          : inArray(persons.id, personsWithActiveLeaves),
       )
       .limit(limit)
       .offset(offset)
       .orderBy(orderBy(orderColumn));
 
-    // 为每个人员获取当前活跃的休假和最后联系记录
+    // 为每个人员获取当前活跃的休假、最后联系记录和当前提醒状态
     const enrichedPersonList = await Promise.all(
       personList.map(async person => {
-        // 获取当前活跃的休假（我们已经确保所有人员都有活跃且未结束的休假）
+        // 获取当前活跃的休假（包括即将开始和进行中的休假）
         const [currentLeave] = await db
           .select({
             id: leaves.id,
@@ -202,10 +204,10 @@ personsRouter.get('/', validateQuery(PersonQuerySchema), async c => {
             and(
               eq(leaves.personId, person.id),
               eq(leaves.status, 'active'),
-              gte(leaves.endDate, currentDate),
+              gte(leaves.endDate, currentDate), // 未结束的休假
             ),
           )
-          .orderBy(desc(leaves.createdAt))
+          .orderBy(desc(leaves.startDate)) // 按开始日期降序，优先显示最近的
           .limit(1);
 
         // 获取最后一次联系记录
@@ -222,10 +224,55 @@ personsRouter.get('/', validateQuery(PersonQuerySchema), async c => {
           .orderBy(desc(contacts.contactDate))
           .limit(1);
 
+        // 获取当前未处理的提醒记录（用于确定人员状态）
+        const [currentReminder] = await db
+          .select({
+            id: reminders.id,
+            reminder_type: reminders.reminderType,
+            reminder_date: reminders.reminderDate,
+            priority: reminders.priority,
+            is_handled: reminders.isHandled,
+          })
+          .from(reminders)
+          .where(
+            and(
+              eq(reminders.personId, person.id),
+              eq(reminders.isHandled, false),
+            ),
+          )
+          .orderBy(desc(reminders.reminderDate))
+          .limit(1);
+
+        // 根据提醒记录的 priority 确定人员状态
+        let status = 'inactive';
+        if (currentLeave) {
+          if (currentReminder) {
+            // 根据提醒优先级确定状态
+            switch (currentReminder.priority) {
+              case 'high':
+                status = 'urgent';
+                break;
+              case 'medium':
+                status = 'suggest';
+                break;
+              case 'low':
+                status = 'normal';
+                break;
+              default:
+                status = 'normal';
+            }
+          } else {
+            // 有活跃休假但没有提醒记录，说明联系正常
+            status = 'normal';
+          }
+        }
+
         return {
           ...person,
           current_leave: currentLeave || null,
           last_contact: lastContact || null,
+          current_reminder: currentReminder || null,
+          status: status,
         };
       }),
     );
@@ -268,6 +315,27 @@ personsRouter.get(
         currentUser.role,
         currentUser.departmentId,
       );
+
+      // 获取当前日期
+      const currentDate = new Date().toISOString().split('T')[0];
+
+      // 检查该人员是否有活跃休假
+      const [activeLeave] = await db
+        .select({ id: leaves.id })
+        .from(leaves)
+        .where(
+          and(
+            eq(leaves.personId, id),
+            eq(leaves.status, 'active'),
+            gte(leaves.endDate, currentDate),
+          ),
+        )
+        .limit(1);
+
+      // 如果没有活跃休假，返回人员不存在（因为只显示在外人员）
+      if (!activeLeave) {
+        return notFoundResponse(c, '人员不存在或无权限访问');
+      }
 
       // 构建查询条件
       const conditions = [eq(persons.id, id)];
@@ -316,8 +384,96 @@ personsRouter.get(
         return notFoundResponse(c, '人员不存在或无权限访问');
       }
 
+      // 获取当前活跃的休假
+      const [currentLeave] = await db
+        .select({
+          id: leaves.id,
+          leave_type: leaves.leaveType,
+          location: leaves.location,
+          start_date: leaves.startDate,
+          end_date: leaves.endDate,
+          days: leaves.days,
+          status: leaves.status,
+        })
+        .from(leaves)
+        .where(
+          and(
+            eq(leaves.personId, id),
+            eq(leaves.status, 'active'),
+            gte(leaves.endDate, currentDate),
+          ),
+        )
+        .orderBy(desc(leaves.startDate))
+        .limit(1);
+
+      // 获取最后一次联系记录
+      const [lastContact] = await db
+        .select({
+          id: contacts.id,
+          contact_date: contacts.contactDate,
+          contact_by: contacts.contactBy,
+          contact_method: contacts.contactMethod,
+          notes: contacts.notes,
+        })
+        .from(contacts)
+        .where(eq(contacts.personId, id))
+        .orderBy(desc(contacts.contactDate))
+        .limit(1);
+
+      // 获取当前未处理的提醒记录
+      const [currentReminder] = await db
+        .select({
+          id: reminders.id,
+          reminder_type: reminders.reminderType,
+          reminder_date: reminders.reminderDate,
+          priority: reminders.priority,
+          is_handled: reminders.isHandled,
+        })
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.personId, id),
+            eq(reminders.isHandled, false),
+          ),
+        )
+        .orderBy(desc(reminders.reminderDate))
+        .limit(1);
+
+      // 根据提醒记录的 priority 确定人员状态
+      let status = 'inactive';
+      if (currentLeave) {
+        if (currentReminder) {
+          // 根据提醒优先级确定状态
+          switch (currentReminder.priority) {
+            case 'high':
+              status = 'urgent';
+              break;
+            case 'medium':
+              status = 'suggest';
+              break;
+            case 'low':
+              status = 'normal';
+              break;
+            default:
+              status = 'normal';
+          }
+        } else {
+          // 有活跃休假但没有提醒记录，说明联系正常
+          status = 'normal';
+        }
+      }
+
+      // 构建包含额外信息的人员数据
+      const enrichedPerson = {
+        ...person[0],
+        current_leave: currentLeave || null,
+        last_contact: lastContact || null,
+        current_reminder: currentReminder || null,
+        status: status,
+      };
+
       // 转换字段名为驼峰命名
-      const convertedPerson = convertDbToApi(person[0]);
+      const convertedPerson = convertDbToApi(enrichedPerson);
       return successResponse(c, convertedPerson);
     } catch (error) {
       console.error('获取人员信息失败:', error);

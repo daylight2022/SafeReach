@@ -45,6 +45,7 @@ export interface Person {
   updatedAt: string;
   currentLeave?: Leave;
   lastContact?: Contact;
+  currentReminder?: Reminder;
   status?: PersonStatus;
   departmentInfo?: Department;
   // Department info returned from API

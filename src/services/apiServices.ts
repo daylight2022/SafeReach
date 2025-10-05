@@ -176,9 +176,49 @@ export const reminderService = {
     return apiClient.delete(`/reminders/person/${personId}/today`);
   },
 
-  // 标记提醒为已处理
-  markAsHandled: async (id: string): Promise<ApiResponse<Reminder>> => {
-    return apiClient.put(`/reminders/${id}`, { isHandled: true });
+  // 标记提醒为已处理（使用 handle 接口）
+  handleReminder: async (id: string): Promise<ApiResponse<Reminder>> => {
+    return apiClient.post(`/reminders/${id}/handle`);
+  },
+
+  // 标记某人的所有未处理提醒为已处理
+  handlePersonReminders: async (
+    personId: string,
+  ): Promise<ApiResponse<{ handledCount: number }>> => {
+    // 先获取该人员的未处理提醒列表
+    const remindersResult = await apiClient.get<{
+      reminders: Reminder[];
+      pagination: any;
+    }>('/reminders', {
+      personId,
+      isHandled: false,
+      limit: 100,
+    });
+
+    if (!remindersResult.success || !remindersResult.data?.reminders) {
+      return {
+        success: false,
+        message: '获取提醒记录失败',
+        data: { handledCount: 0 },
+      };
+    }
+
+    // 批量标记为已处理
+    let handledCount = 0;
+    for (const reminder of remindersResult.data.reminders) {
+      try {
+        await apiClient.post(`/reminders/${reminder.id}/handle`);
+        handledCount++;
+      } catch (error) {
+        console.warn(`标记提醒 ${reminder.id} 失败:`, error);
+      }
+    }
+
+    return {
+      success: true,
+      message: `已标记 ${handledCount} 条提醒为已处理`,
+      data: { handledCount },
+    };
   },
 };
 
@@ -251,6 +291,14 @@ export const statisticsService = {
     const url = queryString ? `/statistics?${queryString}` : '/statistics';
 
     return apiClient.get(url);
+  },
+
+  // 获取提醒设置（用于统计页面展示）
+  getReminderSettings: async (): Promise<ApiResponse<{
+    urgentThreshold: number;
+    suggestThreshold: number;
+  }>> => {
+    return apiClient.get('/reminder-settings');
   },
 
   // 获取部门统计

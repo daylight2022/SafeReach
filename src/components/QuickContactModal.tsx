@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,19 @@ import {
   StyleSheet,
   Linking,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
+import LinearGradient from 'react-native-linear-gradient';
 import { COLORS } from '@/utils/constants';
 import { Person } from '@/types';
 import { openWeChat } from '@/utils/wechat';
+import { contactService, reminderService } from '@/services/apiServices';
+import { userStorage } from '@/utils/storage';
+import {
+  showOperationSuccessToast,
+  showOperationErrorToast,
+} from '@/utils/errorHandler';
 
 interface Props {
   visible: boolean;
@@ -26,6 +34,8 @@ const QuickContactModal: React.FC<Props> = ({
   onClose,
   onContactConfirm,
 }) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   if (!person) return null;
 
   const handleCall = (phone: string) => {
@@ -34,14 +44,12 @@ const QuickContactModal: React.FC<Props> = ({
       return;
     }
     Linking.openURL(`tel:${phone}`);
-    onContactConfirm?.();
-    onClose();
+    // 不立即关闭，让用户可以点击"完成联系"按钮
   };
 
   const handleWechat = async () => {
     await openWeChat();
-    onContactConfirm?.();
-    onClose();
+    // 不立即关闭，让用户可以点击"完成联系"按钮
   };
 
   const handleSMS = (phone: string) => {
@@ -50,8 +58,64 @@ const QuickContactModal: React.FC<Props> = ({
       return;
     }
     Linking.openURL(`sms:${phone}`);
-    onContactConfirm?.();
-    onClose();
+    // 不立即关闭，让用户可以点击"完成联系"按钮
+  };
+
+  const handleCompleteContact = async () => {
+    Alert.alert('确认联系', '确认已完成联系？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '确认',
+        onPress: async () => {
+          setIsSubmitting(true);
+          try {
+            const contactDate = new Date().toISOString();
+
+            // 获取当前用户信息
+            const currentUser = await userStorage.getCurrentUser();
+            if (!currentUser) {
+              throw new Error('无法获取当前用户信息，请重新登录');
+            }
+
+            // 使用后端API创建联系记录
+            const contactResult = await contactService.createContact({
+              personId: person.id,
+              leaveId: person.currentLeave?.id || undefined,
+              contactDate: contactDate,
+              contactMethod: 'phone',
+            });
+
+            if (!contactResult.success) {
+              console.error('创建联系记录失败:', contactResult.message);
+              throw new Error(`联系记录创建失败: ${contactResult.message}`);
+            }
+
+            // 标记该人员的所有未处理提醒记录为已处理
+            try {
+              const reminderResult =
+                await reminderService.handlePersonReminders(person.id);
+              if (reminderResult.success) {
+                const handledCount = reminderResult.data?.handledCount || 0;
+                console.log(`✅ 已标记 ${handledCount} 条提醒记录为已处理`);
+              } else {
+                console.warn('标记提醒记录失败:', reminderResult.message);
+              }
+            } catch (reminderError) {
+              console.warn('标记提醒记录时出错:', reminderError);
+            }
+
+            showOperationSuccessToast('contact');
+            onContactConfirm?.();
+            onClose();
+          } catch (error) {
+            console.error('联系确认失败:', error);
+            showOperationErrorToast('contact', error);
+          } finally {
+            setIsSubmitting(false);
+          }
+        },
+      },
+    ]);
   };
 
   return (
@@ -154,6 +218,32 @@ const QuickContactModal: React.FC<Props> = ({
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* 完成联系按钮 */}
+            <TouchableOpacity
+              style={styles.completeButton}
+              onPress={handleCompleteContact}
+              disabled={isSubmitting}
+            >
+              <LinearGradient
+                colors={COLORS.successGradient}
+                style={styles.completeButtonGradient}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <>
+                    <Icon
+                      name="check-circle"
+                      size={18}
+                      color={COLORS.white}
+                      style={styles.completeButtonIcon}
+                    />
+                    <Text style={styles.completeButtonText}>完成联系</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -252,6 +342,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.darkGray,
     marginTop: 2,
+  },
+  completeButton: {
+    marginTop: 16,
+  },
+  completeButtonGradient: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  completeButtonIcon: {
+    marginRight: 8,
+  },
+  completeButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

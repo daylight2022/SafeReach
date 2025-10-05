@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import { COLORS } from '../utils/constants';
+import QuickContactModal from './QuickContactModal';
+import { Person } from '../types';
 
 interface StatusCardProps {
   title: string;
@@ -16,6 +18,7 @@ interface StatusCardProps {
   status: 'urgent' | 'warning' | 'normal';
   items: any[];
   onItemPress: (personId: any) => void;
+  onContactComplete?: () => void;
 }
 
 const StatusCard = ({
@@ -24,7 +27,38 @@ const StatusCard = ({
   status,
   items,
   onItemPress,
+  onContactComplete,
 }: StatusCardProps) => {
+  const [showContactModal, setShowContactModal] = useState(false);
+  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+
+  const handleContactPress = (item: any, e: any) => {
+    e.stopPropagation(); // 阻止事件冒泡
+    // 将 reminder 数据转换为 Person 格式
+    const person: Person = {
+      id: item.person?.id || '',
+      name: item.person?.name || '',
+      phone: item.person?.phone || '',
+      emergencyContact: item.person?.emergencyContact,
+      emergencyPhone: item.person?.emergencyPhone,
+      departmentId: item.person?.departmentId || '',
+      department: item.person?.department,
+      personType: item.person?.personType || 'employee',
+      annualLeaveTotal: item.person?.annualLeaveTotal || 0,
+      annualLeaveUsed: item.person?.annualLeaveUsed || 0,
+      annualLeaveTimes: item.person?.annualLeaveTimes || 0,
+      currentLeave: item.leave,
+      createdAt: item.person?.createdAt || new Date().toISOString(),
+      updatedAt: item.person?.updatedAt || new Date().toISOString(),
+    };
+    setSelectedPerson(person);
+    setShowContactModal(true);
+  };
+
+  const handleContactConfirm = () => {
+    onContactComplete?.();
+  };
+
   const getStatusColor = () => {
     switch (status) {
       case 'urgent':
@@ -110,6 +144,7 @@ const StatusCard = ({
                     styles.contactButton,
                     { backgroundColor: statusStyle.color },
                   ]}
+                  onPress={(e) => handleContactPress(item, e)}
                 >
                   <Text style={styles.contactButtonText}>
                     {status === 'urgent' ? '立即联系' : '联系'}
@@ -124,6 +159,14 @@ const StatusCard = ({
           </View>
         )}
       </View>
+
+      {/* 快捷联系弹窗 */}
+      <QuickContactModal
+        visible={showContactModal}
+        person={selectedPerson}
+        onClose={() => setShowContactModal(false)}
+        onContactConfirm={handleContactConfirm}
+      />
     </View>
   );
 };

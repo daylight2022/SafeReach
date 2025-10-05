@@ -3,8 +3,8 @@
 
 // 开发环境配置
 const DEV_CONFIG = {
-  API_BASE_URL: 'http://1.12.60.17:3000/api', // 局域网开发环境
-  // API_BASE_URL: 'http://192.168.18.235:3000/api', // 局域网开发环境
+  // API_BASE_URL: 'http://1.12.60.17:3000/api', // 局域网开发环境
+  API_BASE_URL: 'http://192.168.29.235:3000/api', // 局域网开发环境
 };
 
 // 生产环境配置

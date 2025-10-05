@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  RefreshControl,
+  Modal,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import Icon from 'react-native-vector-icons/FontAwesome';
@@ -35,6 +37,18 @@ interface TrendData {
   trend: 'up' | 'down' | 'stable';
 }
 
+interface Trends {
+  timelyResponseRate: TrendData;
+  overdueProcessed: TrendData;
+  urgentCount: TrendData;
+  unhandledReminders: TrendData;
+}
+
+interface ReminderSettings {
+  urgentThreshold: number;
+  suggestThreshold: number;
+}
+
 interface Statistics {
   totalContacts: number;
   totalPersons: number;
@@ -48,11 +62,13 @@ interface Statistics {
   departmentRanking: Array<{
     departmentId: string;
     name: string;
-    reminderProcessRate: number;
-    onTimeRate: number;
+    timelyResponseRate: number;    // 及时响应率
+    overdueProcessed: number;      // 超期处理数
     urgentCount: number;
     totalReminders: number;
     unhandledReminders: number;
+    healthScore?: number;
+    avgResponseDays?: number;
   }>;
   responseMetrics?: {
     totalScore: number;
@@ -62,15 +78,20 @@ interface Statistics {
     handledLate: number;
     proactiveContacts: number;
     responseGrade: string;
-    reminderProcessRate: number;
-    onTimeRate: number;
+    timelyResponseRate: number;    // 及时响应率
+    overdueProcessed: number;      // 超期处理数
+    suggestThreshold: number;      // 建议阈值天数
+    urgentThreshold: number;       // 紧急阈值天数
   };
   healthScore?: number;
-  trends?: {
-    onTimeRate: TrendData;
-    urgentCount: TrendData;
-    unhandledReminders: TrendData;
+  healthScoreDetails?: {
+    totalReminders: number;
+    handledReminders: number;
+    unhandledReminders: number;
+    totalDeduction: number;
+    avgResponseDays: number;
   };
+  trends?: Trends;
 }
 
 const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
@@ -90,16 +111,102 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
     departmentRanking: [],
     healthScore: 0,
     trends: {
-      onTimeRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+      timelyResponseRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+      overdueProcessed: { current: 0, previous: 0, change: 0, trend: 'stable' },
       urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
       unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
     },
   });
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [reminderSettings, setReminderSettings] = useState<ReminderSettings>({
+    urgentThreshold: 10,
+    suggestThreshold: 7,
+  });
 
   useEffect(() => {
+    loadReminderSettings();
     loadStatistics();
   }, [timeRange]);
+
+  const loadReminderSettings = async () => {
+    try {
+      const result = await statisticsService.getReminderSettings();
+      if (result.success && result.data) {
+        setReminderSettings({
+          urgentThreshold: result.data.urgentThreshold,
+          suggestThreshold: result.data.suggestThreshold,
+        });
+      }
+    } catch (error) {
+      console.error('加载提醒设置失败:', error);
+    }
+  };
+
+  // 渲染健康度规则说明Modal
+  const renderRuleModal = () => (
+    <Modal
+      visible={showRuleModal}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={() => setShowRuleModal(false)}
+    >
+      <TouchableOpacity
+        style={styles.modalOverlay}
+        activeOpacity={1}
+        onPress={() => setShowRuleModal(false)}
+      >
+        <View style={styles.modalContainer}>
+          <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>健康度评分规则</Text>
+                <TouchableOpacity
+                  onPress={() => setShowRuleModal(false)}
+                  style={styles.modalCloseButton}
+                >
+                  <Icon name="times" size={20} color={COLORS.darkGray} />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.modalBody}>
+                <Text style={styles.ruleDescription}>
+                  基于提醒响应速度的扣分制（满分100分）
+                </Text>
+                <Text style={{fontSize: 13, color: '#6B7280', marginBottom: 12}}>
+                  💡 提醒于每日凌晨创建
+                </Text>
+                <View style={styles.ruleList}>
+                  <View style={styles.ruleItem}>
+                    <View style={[styles.ruleDot, { backgroundColor: COLORS.success }]} />
+                <Text style={styles.ruleText}>
+                  当天处理（0天）：不扣分
+                </Text>
+              </View>
+              <View style={styles.ruleItem}>
+                <View style={[styles.ruleDot, { backgroundColor: COLORS.warning }]} />
+                <Text style={styles.ruleText}>
+                  超过{reminderSettings.suggestThreshold}天后，每多一天扣1分
+                </Text>
+              </View>
+              <View style={styles.ruleItem}>
+                <View style={[styles.ruleDot, { backgroundColor: COLORS.danger }]} />
+                <Text style={styles.ruleText}>
+                  超过{reminderSettings.urgentThreshold}天后，每多一天扣3分
+                </Text>
+              </View>
+                </View>
+                <Text style={styles.ruleNote}>
+                  * 阈值可在提醒设置中自定义调整（管理员权限）
+                </Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </Modal>
+  );
 
   const loadStatistics = async () => {
     setLoading(true);
@@ -138,7 +245,8 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
           responseMetrics: data.responseMetrics,
           healthScore: data.healthScore || 0,
           trends: data.trends || {
-            onTimeRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+            timelyResponseRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+            overdueProcessed: { current: 0, previous: 0, change: 0, trend: 'stable' },
             urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
             unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
           },
@@ -159,7 +267,8 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
           departmentRanking: [],
           healthScore: 0,
           trends: {
-            onTimeRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+            timelyResponseRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+            overdueProcessed: { current: 0, previous: 0, change: 0, trend: 'stable' },
             urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
             unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
           },
@@ -181,7 +290,8 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
         departmentRanking: [],
         healthScore: 0,
         trends: {
-          onTimeRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+          timelyResponseRate: { current: 0, previous: 0, change: 0, trend: 'stable' },
+          overdueProcessed: { current: 0, previous: 0, change: 0, trend: 'stable' },
           urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
           unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
         },
@@ -189,6 +299,12 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadStatistics();
+    setRefreshing(false);
   };
 
   const getStartDate = () => {
@@ -333,7 +449,7 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
     const alerts = [];
     
     const urgentCount = statistics.statusDistribution?.urgent?.count || 0;
-    if (urgentCount > 5) {
+    if (urgentCount > 1) {
       alerts.push({
         type: 'danger',
         icon: 'exclamation-triangle',
@@ -341,7 +457,7 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
       });
     }
 
-    if ((statistics.responseMetrics?.unhandledReminders || 0) > 10) {
+    if ((statistics.responseMetrics?.unhandledReminders || 0) > 3) {
       alerts.push({
         type: 'warning',
         icon: 'bell',
@@ -349,11 +465,19 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
       });
     }
 
-    if ((statistics.responseMetrics?.onTimeRate || 100) < 60) {
+    if ((statistics.responseMetrics?.timelyResponseRate || 100) < 50) {
       alerts.push({
         type: 'info',
         icon: 'lightbulb-o',
-        message: '及时处理率偏低，建议加强日常联系',
+        message: '及时响应率偏低，建议加强日常联系',
+      });
+    }
+    
+    if ((statistics.responseMetrics?.overdueProcessed || 0) > 3) {
+      alerts.push({
+        type: 'warning',
+        icon: 'clock-o',
+        message: `有 ${statistics.responseMetrics?.overdueProcessed} 个提醒超期处理！`,
       });
     }
 
@@ -393,6 +517,9 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         {/* 预警提示 */}
         {getAlerts().length > 0 && (
@@ -426,17 +553,38 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
 
         {/* 健康度评分卡片 */}
         <View style={styles.healthCard}>
-          <Text style={styles.cardTitle}>部门健康度评分</Text>
+          <View style={styles.healthCardHeader}>
+            <Text style={styles.cardTitle}>部门健康度评分</Text>
+            <TouchableOpacity
+              onPress={() => setShowRuleModal(true)}
+              style={styles.infoButton}
+            >
+              <Icon name="question-circle" size={20} color={COLORS.primary} />
+            </TouchableOpacity>
+          </View>
           <View style={styles.healthCardContent}>
             {renderHealthScore()}
             <View style={styles.healthMetrics}>
               <View style={styles.healthMetricItem}>
-                <Text style={styles.healthMetricLabel}>及时处理率</Text>
+                <Text style={styles.healthMetricLabel}>平均响应天数</Text>
                 <View style={styles.healthMetricRow}>
-                  <Text style={styles.healthMetricValue}>
-                    {statistics.responseMetrics?.onTimeRate || 0}%
+                  <Text style={[styles.healthMetricValue, {
+                    color: (statistics.healthScoreDetails?.avgResponseDays || 0) <= 7 
+                      ? COLORS.success 
+                      : (statistics.healthScoreDetails?.avgResponseDays || 0) <= 9
+                      ? COLORS.warning
+                      : COLORS.danger
+                  }]}>
+                    {statistics.healthScoreDetails?.avgResponseDays || 0}天
                   </Text>
-                  {statistics.trends && renderTrendIndicator(statistics.trends.onTimeRate, true)}
+                </View>
+              </View>
+              <View style={styles.healthMetricItem}>
+                <Text style={styles.healthMetricLabel}>总扣分</Text>
+                <View style={styles.healthMetricRow}>
+                  <Text style={[styles.healthMetricValue, { color: COLORS.danger }]}>
+                    {statistics.healthScoreDetails?.totalDeduction || 0}分
+                  </Text>
                 </View>
               </View>
               <View style={styles.healthMetricItem}>
@@ -446,15 +594,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                     {statistics.responseMetrics?.unhandledReminders || 0}
                   </Text>
                   {statistics.trends && renderTrendIndicator(statistics.trends.unhandledReminders, false)}
-                </View>
-              </View>
-              <View style={styles.healthMetricItem}>
-                <Text style={styles.healthMetricLabel}>紧急人数</Text>
-                <View style={styles.healthMetricRow}>
-                  <Text style={styles.healthMetricValue}>
-                    {statistics.statusDistribution?.urgent?.count || 0}
-                  </Text>
-                  {statistics.trends && renderTrendIndicator(statistics.trends.urgentCount, false)}
                 </View>
               </View>
             </View>
@@ -498,36 +637,42 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
 
-        {/* 响应评估卡片 */}
-        <View style={styles.overviewGrid}>
-          <View style={styles.overviewCard}>
-            <View style={styles.overviewHeader}>
-              <Icon name="check-circle" size={20} color={COLORS.success} />
-              <Text
-                style={[
-                  styles.overviewChange,
-                  {
-                    color:
-                      (statistics.responseMetrics?.onTimeRate ?? 0) >= 80
-                        ? COLORS.success
-                        : (statistics.responseMetrics?.onTimeRate ?? 0) >= 60
-                        ? COLORS.warning
-                        : COLORS.danger,
-                  },
-                ]}
-              >
-                {(statistics.responseMetrics?.onTimeRate ?? 0) >= 80
-                  ? '优秀'
-                  : (statistics.responseMetrics?.onTimeRate ?? 0) >= 60
-                  ? '良好'
-                  : '需改进'}
-              </Text>
-            </View>
-            <Text style={styles.overviewValue}>
-              {statistics.responseMetrics?.onTimeRate || 0}%
-            </Text>
-            <Text style={styles.overviewLabel}>及时处理率</Text>
-          </View>
+         {/* 响应评估卡片 */}
+         <View style={styles.overviewGrid}>
+           <View style={styles.overviewCard}>
+             <View style={styles.overviewHeader}>
+               <Icon name="check-circle" size={20} color={COLORS.success} />
+               <Text
+                 style={[
+                   styles.overviewChange,
+                   {
+                     color:
+                       (statistics.responseMetrics?.timelyResponseRate ?? 0) >= 80
+                         ? COLORS.success
+                         : (statistics.responseMetrics?.timelyResponseRate ?? 0) >= 60
+                         ? COLORS.warning
+                         : COLORS.danger,
+                   },
+                 ]}
+               >
+                 {(statistics.responseMetrics?.timelyResponseRate ?? 0) >= 80
+                   ? '优秀'
+                   : (statistics.responseMetrics?.timelyResponseRate ?? 0) >= 60
+                   ? '良好'
+                   : '需改进'}
+               </Text>
+             </View>
+             <View style={styles.overviewValueWithTrend}>
+               <Text style={styles.overviewValue}>
+                 {statistics.responseMetrics?.timelyResponseRate || 0}%
+               </Text>
+               {statistics.trends && renderTrendIndicator(statistics.trends.timelyResponseRate, true)}
+             </View>
+             <Text style={styles.overviewLabel}>及时响应率</Text>
+             <Text style={styles.overviewHint}>
+               提醒生成当天就处理的比例
+             </Text>
+           </View>
 
           <View style={styles.overviewCard}>
             <View style={styles.overviewHeader}>
@@ -537,25 +682,31 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                   styles.overviewChange,
                   {
                     color:
-                      (statistics.responseMetrics?.unhandledReminders ?? 0) === 0
+                      (statistics.responseMetrics?.overdueProcessed ?? 0) === 0
                         ? COLORS.success
-                        : (statistics.responseMetrics?.unhandledReminders ?? 0) <= 3
+                        : (statistics.responseMetrics?.overdueProcessed ?? 0) <= 3
                         ? COLORS.warning
                         : COLORS.danger,
                   },
                 ]}
               >
-                {(statistics.responseMetrics?.unhandledReminders ?? 0) === 0
+                {(statistics.responseMetrics?.overdueProcessed ?? 0) === 0
                   ? '完美'
-                  : (statistics.responseMetrics?.unhandledReminders ?? 0) <= 3
+                  : (statistics.responseMetrics?.overdueProcessed ?? 0) <= 3
                   ? '注意'
                   : '警告'}
               </Text>
             </View>
-            <Text style={styles.overviewValue}>
-              {statistics.responseMetrics?.unhandledReminders || 0}
+            <View style={styles.overviewValueWithTrend}>
+              <Text style={styles.overviewValue}>
+                {statistics.responseMetrics?.overdueProcessed || 0}
+              </Text>
+              {statistics.trends && renderTrendIndicator(statistics.trends.overdueProcessed, false)}
+            </View>
+            <Text style={styles.overviewLabel}>超期处理数</Text>
+            <Text style={styles.overviewHint}>
+              超过{statistics.responseMetrics?.urgentThreshold || reminderSettings.urgentThreshold}天才处理的数量
             </Text>
-            <Text style={styles.overviewLabel}>未处理提醒</Text>
           </View>
         </View>
 
@@ -672,15 +823,15 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.metricsGrid}>
               <View style={styles.metricItem}>
                 <Text style={styles.metricValue}>
-                  {statistics.responseMetrics?.handledOnTime || 0}
+                  {statistics.responseMetrics?.totalReminders || 0}
                 </Text>
-                <Text style={styles.metricLabel}>及时处理</Text>
+                <Text style={styles.metricLabel}>总提醒数</Text>
               </View>
               <View style={styles.metricItem}>
-                <Text style={[styles.metricValue, { color: COLORS.warning }]}>
-                  {statistics.responseMetrics?.handledLate || 0}
+                <Text style={[styles.metricValue, { color: COLORS.success }]}>
+                  {statistics.responseMetrics?.timelyResponseRate || 0}%
                 </Text>
-                <Text style={styles.metricLabel}>延迟处理</Text>
+                <Text style={styles.metricLabel}>及时响应率</Text>
               </View>
               <View style={styles.metricItem}>
                 <Text style={[styles.metricValue, { color: COLORS.danger }]}>
@@ -689,127 +840,99 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.metricLabel}>未处理</Text>
               </View>
               <View style={styles.metricItem}>
-                <Text style={[styles.metricValue, { color: COLORS.success }]}>
-                  {statistics.responseMetrics?.proactiveContacts || 0}
+                <Text style={[styles.metricValue, { color: COLORS.warning }]}>
+                  {statistics.responseMetrics?.overdueProcessed || 0}
                 </Text>
-                <Text style={styles.metricLabel}>主动联系</Text>
+                <Text style={styles.metricLabel}>超期处理</Text>
               </View>
             </View>
             
-             {statistics.departmentRanking && statistics.departmentRanking.length > 0 && (
-               <View style={styles.departmentSummary}>
-                 <View style={styles.summaryRow}>
-                   <Text style={styles.summaryLabel}>提醒处理率</Text>
-                   <Text
-                     style={[
-                       styles.summaryValue,
-                       {
-                         color:
-                           (statistics.departmentRanking[0]?.reminderProcessRate || 0) >= 90
-                             ? COLORS.success
-                             : (statistics.departmentRanking[0]?.reminderProcessRate || 0) >= 70
-                             ? COLORS.warning
-                             : COLORS.danger,
-                       },
-                     ]}
-                   >
-                     {statistics.departmentRanking[0]?.reminderProcessRate || 0}%
-                   </Text>
-                 </View>
-                 <View style={styles.summaryRow}>
-                   <Text style={styles.summaryLabel}>及时处理率</Text>
-                   <Text
-                     style={[
-                       styles.summaryValue,
-                       {
-                         color:
-                           (statistics.departmentRanking[0]?.onTimeRate || 0) >= 80
-                             ? COLORS.success
-                             : (statistics.departmentRanking[0]?.onTimeRate || 0) >= 60
-                             ? COLORS.warning
-                             : COLORS.danger,
-                       },
-                     ]}
-                   >
-                     {statistics.departmentRanking[0]?.onTimeRate || 0}%
-                   </Text>
-                 </View>
-                 <View style={styles.summaryRow}>
-                   <Text style={styles.summaryLabel}>紧急人数</Text>
-                   <Text
-                     style={[
-                       styles.summaryValue,
-                       {
-                         color:
-                           (statistics.departmentRanking[0]?.urgentCount || 0) === 0
-                             ? COLORS.success
-                             : (statistics.departmentRanking[0]?.urgentCount || 0) <= 3
-                             ? COLORS.warning
-                             : COLORS.danger,
-                       },
-                     ]}
-                   >
-                     {statistics.departmentRanking[0]?.urgentCount || 0}人
-                   </Text>
-                 </View>
-               </View>
-             )}
+            <View style={styles.departmentSummary}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>建议联系阈值</Text>
+                <Text style={styles.summaryValue}>
+                  {statistics.responseMetrics?.suggestThreshold || 7}天
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>紧急联系阈值</Text>
+                <Text style={styles.summaryValue}>
+                  {statistics.responseMetrics?.urgentThreshold || 10}天
+                </Text>
+              </View>
+            </View>
            </View>
         )}
 
         {/* 部门对比排名（管理员可见）*/}
         {statistics.departmentRanking && statistics.departmentRanking.length > 1 && (
           <View style={[styles.card, { marginBottom: 20 }]}>
-            <Text style={styles.cardTitle}>部门对比排名</Text>
+            <View style={styles.rankingTitleRow}>
+              <Text style={styles.cardTitle}>部门健康度排名</Text>
+              <Text style={styles.rankingSubtitle}>按健康度评分排序</Text>
+            </View>
             <View style={styles.departmentRankingList}>
-            {statistics.departmentRanking.map((dept, index) => (
+            {statistics.departmentRanking.map((dept, index) => {
+              const healthScore = dept.healthScore || 0;
+              const avgResponseDays = dept.avgResponseDays || 0;
+              
+              // 根据健康度确定颜色
+              let scoreColor = COLORS.success;
+              if (healthScore < 70) {
+                scoreColor = COLORS.danger;
+              } else if (healthScore < 80) {
+                scoreColor = COLORS.warning;
+              } else if (healthScore < 90) {
+                scoreColor = COLORS.primary;
+              }
+              
+              return (
                 <View key={dept.departmentId} style={styles.departmentRankItem}>
-                <View
-                  style={[
-                    styles.rankBadge,
-                    index === 0 && styles.rankBadgeGold,
-                    index === 1 && styles.rankBadgeSilver,
-                    index === 2 && styles.rankBadgeBronze,
-                  ]}
-                >
-                  <Text style={styles.rankText}>{index + 1}</Text>
-                </View>
+                  <View
+                    style={[
+                      styles.rankBadge,
+                      index === 0 && styles.rankBadgeGold,
+                      index === 1 && styles.rankBadgeSilver,
+                      index === 2 && styles.rankBadgeBronze,
+                    ]}
+                  >
+                    <Text style={styles.rankText}>{index + 1}</Text>
+                  </View>
                   <View style={styles.departmentRankContent}>
                     <View style={styles.departmentRankHeader}>
                       <Text style={styles.departmentName}>{dept.name}</Text>
-                      <View
-                        style={[
-                          styles.badge,
-                          {
-                            backgroundColor:
-                              dept.onTimeRate >= 80
-                                ? COLORS.successGradient[0]
-                                : dept.onTimeRate >= 60
-                                ? COLORS.warningGradient[0]
-                                : COLORS.dangerGradient[0],
-                          },
-                        ]}
-                      >
-                        <Text style={styles.badgeText}>{dept.onTimeRate}%</Text>
+                      <View style={styles.healthScoreBadge}>
+                        <Text style={[styles.healthScoreBadgeText, { color: scoreColor }]}>
+                          {healthScore}分
+                        </Text>
                       </View>
                     </View>
                     <View style={styles.departmentRankStats}>
                       <View style={styles.departmentRankStat}>
-                        <Text style={styles.departmentRankStatLabel}>提醒处理</Text>
-                        <Text style={styles.departmentRankStatValue}>
-                          {dept.reminderProcessRate || 0}%
-                  </Text>
-                </View>
+                        <Text style={styles.departmentRankStatLabel}>平均响应</Text>
+                        <Text style={[
+                          styles.departmentRankStatValue,
+                          {
+                            color: avgResponseDays <= 7 
+                              ? COLORS.success 
+                              : avgResponseDays <= 9
+                              ? COLORS.warning
+                              : COLORS.danger
+                          }
+                        ]}>
+                          {avgResponseDays}天
+                        </Text>
+                      </View>
                       <View style={styles.departmentRankStat}>
                         <Text style={styles.departmentRankStatLabel}>未处理</Text>
-                <Text
-                  style={[
+                        <Text
+                          style={[
                             styles.departmentRankStatValue,
                             { color: (dept.unhandledReminders || 0) > 0 ? COLORS.danger : COLORS.success },
                           ]}
                         >
                           {dept.unhandledReminders || 0}
-                </Text>
+                        </Text>
                       </View>
                       <View style={styles.departmentRankStat}>
                         <Text style={styles.departmentRankStatLabel}>紧急</Text>
@@ -824,15 +947,18 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                       </View>
                     </View>
                   </View>
-              </View>
-            ))}
+                </View>
+              );
+            })}
           </View>
         </View>
         )}
-      </ScrollView>
-    </View>
-  );
-};
+       </ScrollView>
+       {/* 健康度规则说明Modal */}
+       {renderRuleModal()}
+     </View>
+   );
+ };
 
 const styles = StyleSheet.create({
   container: {
@@ -911,10 +1037,21 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#111827',
   },
+  overviewValueWithTrend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   overviewLabel: {
     fontSize: 12,
     color: COLORS.darkGray,
     marginTop: 4,
+  },
+  overviewHint: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   card: {
     backgroundColor: COLORS.white,
@@ -1161,6 +1298,15 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  healthCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  infoButton: {
+    padding: 4,
+  },
   healthCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1269,6 +1415,102 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#111827',
+  },
+  // Modal样式
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '90%',
+    maxWidth: 400,
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalBody: {
+    paddingTop: 4,
+  },
+  ruleDescription: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 12,
+  },
+  ruleList: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  ruleItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  ruleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  ruleText: {
+    fontSize: 13,
+    color: '#374151',
+  },
+  ruleNote: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  // 排名标题行样式
+  rankingTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  rankingSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
+  // 健康度徽章样式
+  healthScoreBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+  },
+  healthScoreBadgeText: {
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 

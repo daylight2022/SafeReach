@@ -29,13 +29,14 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   const [persons, setPersons] = useState<Person[]>([]);
   const [filteredPersons, setFilteredPersons] = useState<Person[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [filterStatus, setFilterStatus] = useState<PersonStatus | 'all'>('all');
+  const [filterStatus, setFilterStatus] = useState<PersonStatus[]>([]);
   const [filterPersonType, setFilterPersonType] = useState<
-    'employee' | 'intern' | 'manager' | 'all'
-  >('all');
-  const [filterDepartment, setFilterDepartment] = useState<string | 'all'>(
-    'all',
-  );
+    ('employee' | 'intern' | 'manager')[]
+  >([]);
+  const [filterDepartment, setFilterDepartment] = useState<string[]>([]);
+  const [filterLeaveType, setFilterLeaveType] = useState<
+    ('vacation' | 'business' | 'study' | 'hospitalization' | 'care')[]
+  >([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [sortOrder, setSortOrder] = useState<SortOrder>('default');
   const [loading, setLoading] = useState(false);
@@ -56,6 +57,7 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
     filterStatus,
     filterPersonType,
     filterDepartment,
+    filterLeaveType,
     sortOrder,
     persons,
   ]);
@@ -88,19 +90,20 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
       if (result.success && result.data) {
         // 处理不同的响应格式
         let departmentList: Department[] = [];
+        const data: any = result.data;
 
-        if (Array.isArray(result.data)) {
+        if (Array.isArray(data)) {
           // 直接是数组格式
-          departmentList = result.data;
+          departmentList = data;
         } else if (
-          result.data.departments &&
-          Array.isArray(result.data.departments)
+          data.departments &&
+          Array.isArray(data.departments)
         ) {
           // 分页格式 {departments: [...], pagination: {...}}
-          departmentList = result.data.departments;
-        } else if (result.data.data && Array.isArray(result.data.data)) {
+          departmentList = data.departments;
+        } else if (data.data && Array.isArray(data.data)) {
           // 嵌套格式 {data: [...]}
-          departmentList = result.data.data;
+          departmentList = data.data;
         }
 
         console.log(
@@ -135,13 +138,15 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
 
       if (result.success) {
         const personsData = result.data?.persons || [];
-        // 处理数据以匹配现有的数据结构
-        const processedPersons = personsData.map(person => ({
+        // 后端已经返回了包含状态的完整数据，直接使用
+        const processedPersons = personsData.map((person: any) => ({
           ...person,
           currentLeave: person.currentLeave,
           lastContact: person.lastContact,
-          status: calculatePersonStatus(person),
-        }));
+          currentReminder: person.currentReminder,
+          // 使用后端返回的状态，如果没有则默认为 inactive
+          status: person.status || 'inactive',
+        })) as Person[];
         setPersons(processedPersons);
       } else {
         console.error('获取人员列表失败:', result.message);
@@ -152,29 +157,6 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const calculatePersonStatus = (person: any): PersonStatus => {
-    // 检查是否有活跃的假期
-    const activeLeave = person.currentLeave;
-
-    if (!activeLeave) {
-      return 'inactive';
-    }
-
-    // 优先使用关联的联系记录，其次使用直接字段
-    const lastContactDate =
-      person.lastContact?.contactDate || person.lastContactDate;
-    if (!lastContactDate) return 'urgent';
-
-    const daysSinceContact = Math.floor(
-      (new Date().getTime() - new Date(lastContactDate).getTime()) /
-        (1000 * 60 * 60 * 24),
-    );
-
-    if (daysSinceContact > 7) return 'urgent';
-    if (daysSinceContact > 3) return 'suggest';
-    return 'normal';
   };
 
   const getStatusPriority = (status: PersonStatus | undefined): number => {
@@ -208,25 +190,34 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
       );
     }
 
-    // 状态过滤
-    if (filterStatus !== 'all') {
-      filtered = filtered.filter(person => person.status === filterStatus);
-    }
-
-    // 人员类型过滤
-    if (filterPersonType !== 'all') {
-      filtered = filtered.filter(
-        person => person.personType === filterPersonType,
+    // 状态过滤（多选）
+    if (filterStatus.length > 0) {
+      filtered = filtered.filter(person => 
+        person.status && filterStatus.includes(person.status)
       );
     }
 
-    // 部门过滤
-    if (filterDepartment !== 'all') {
-      filtered = filtered.filter(
-        person =>
-          person.departmentId === filterDepartment ||
-          person.department?.id === filterDepartment ||
-          person.departmentInfo?.id === filterDepartment,
+    // 人员类型过滤（多选）
+    if (filterPersonType.length > 0) {
+      filtered = filtered.filter(person =>
+        person.personType && filterPersonType.includes(person.personType),
+      );
+    }
+
+    // 部门过滤（多选）
+    if (filterDepartment.length > 0) {
+      filtered = filtered.filter(person =>
+        filterDepartment.includes(person.departmentId || '') ||
+        filterDepartment.includes(person.department?.id || '') ||
+        filterDepartment.includes(person.departmentInfo?.id || ''),
+      );
+    }
+
+    // 在外类别过滤（多选）
+    if (filterLeaveType.length > 0) {
+      filtered = filtered.filter(person =>
+        person.currentLeave && 
+        filterLeaveType.includes(person.currentLeave.leaveType),
       );
     }
 
@@ -266,6 +257,13 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
     navigation.navigate('AddPerson');
   };
 
+  const handleResetFilters = () => {
+    setFilterStatus([]);
+    setFilterPersonType([]);
+    setFilterDepartment([]);
+    setFilterLeaveType([]);
+  };
+
   const handleSort = () => {
     const nextOrder: SortOrder =
       sortOrder === 'default'
@@ -302,7 +300,7 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
     <PersonCard
       person={item}
       onPress={() => handlePersonPress(item)}
-      onContact={() => handlePersonPress(item)}
+      onContact={loadPersons}
     />
   );
 
@@ -397,7 +395,10 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
         onPersonTypeChange={setFilterPersonType}
         currentDepartment={filterDepartment}
         onDepartmentChange={setFilterDepartment}
+        currentLeaveType={filterLeaveType}
+        onLeaveTypeChange={setFilterLeaveType}
         departments={departments}
+        onReset={handleResetFilters}
       />
     </View>
   );

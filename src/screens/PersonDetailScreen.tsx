@@ -148,19 +148,19 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               throw new Error(`联系记录创建失败: ${contactResult.message}`);
             }
 
-            // 清除该人员当日的未处理提醒记录
+            // 标记该人员的所有未处理提醒记录为已处理
             try {
               const reminderResult =
-                await reminderService.deletePersonTodayReminders(personId);
+                await reminderService.handlePersonReminders(personId);
               if (reminderResult.success) {
-                const deletedCount = reminderResult.data?.deletedCount || 0;
-                console.log(`✅ 已清除 ${deletedCount} 条当日提醒记录`);
+                const handledCount = reminderResult.data?.handledCount || 0;
+                console.log(`✅ 已标记 ${handledCount} 条提醒记录为已处理`);
               } else {
-                console.warn('清除提醒记录失败:', reminderResult.message);
+                console.warn('标记提醒记录失败:', reminderResult.message);
                 // 不抛出错误，因为联系记录已经创建成功
               }
             } catch (reminderError) {
-              console.warn('清除提醒记录时出错:', reminderError);
+              console.warn('标记提醒记录时出错:', reminderError);
               // 不抛出错误，因为联系记录已经创建成功
             }
 
@@ -206,8 +206,33 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     ]);
   };
 
+  // 计算距离最后联系的天数（按日历日期计算）
+  const getDaysSinceContact = (contactDate: string) => {
+    // 使用 startOf('day') 按日历日期计算，而不是绝对24小时
+    return dayjs().startOf('day').diff(dayjs(contactDate).startOf('day'), 'days');
+  };
+
+  // 格式化最后联系时间为人性化文本
+  const getHumanizedContactTime = (contactDate: string) => {
+    const days = getDaysSinceContact(contactDate);
+
+    switch (days) {
+      case 0:
+        return '今天';
+      case 1:
+        return '昨天';
+      case 2:
+        return '前天';
+      default:
+        return `${days}天前`;
+    }
+  };
+
   const getStatusInfo = () => {
-    if (!currentLeave) {
+    // 优先使用从人员列表传过来的状态（基于 reminder 数据）
+    const personStatus = person?.status;
+    
+    if (!currentLeave || personStatus === 'inactive') {
       return {
         color: COLORS.darkGray,
         text: '未在假',
@@ -215,34 +240,34 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
       };
     }
 
-    const lastContact = contacts[0];
-    if (!lastContact) {
-      return {
-        color: COLORS.danger,
-        text: '需立即联系',
-        gradient: COLORS.dangerGradient,
-      };
+    // 根据从后端返回的状态确定显示信息
+    switch (personStatus) {
+      case 'urgent':
+        return {
+          color: COLORS.danger,
+          text: '需立即联系',
+          gradient: COLORS.dangerGradient,
+        };
+      case 'suggest':
+        return {
+          color: COLORS.warning,
+          text: '建议联系',
+          gradient: COLORS.warningGradient,
+        };
+      case 'normal':
+        return {
+          color: COLORS.success,
+          text: '正常',
+          gradient: COLORS.successGradient,
+        };
+      default:
+        // 如果没有状态信息，返回正常状态
+        return {
+          color: COLORS.success,
+          text: '正常',
+          gradient: COLORS.successGradient,
+        };
     }
-
-    const daysSince = dayjs().diff(dayjs(lastContact.contactDate), 'days');
-    if (daysSince > 7) {
-      return {
-        color: COLORS.danger,
-        text: '需立即联系',
-        gradient: COLORS.dangerGradient,
-      };
-    } else if (daysSince > 3) {
-      return {
-        color: COLORS.warning,
-        text: '建议联系',
-        gradient: COLORS.warningGradient,
-      };
-    }
-    return {
-      color: COLORS.success,
-      text: '正常',
-      gradient: COLORS.successGradient,
-    };
   };
 
   const statusInfo = getStatusInfo();
@@ -412,7 +437,7 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             <Text style={styles.cardTitle}>联系记录</Text>
             {contacts[0] && (
               <Text style={styles.lastContactText}>
-                最后联系：{dayjs(contacts[0].contactDate).fromNow()}
+                最后联系：{getHumanizedContactTime(contacts[0].contactDate)}
               </Text>
             )}
           </View>

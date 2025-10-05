@@ -40,11 +40,15 @@ remindersRouter.get('/', validateQuery(ReminderQuerySchema), async c => {
       personId,
       reminderType,
       priority,
-      isHandled,
-      reminderDate,
+      isHandled: queryIsHandled,
+      reminderDate: queryReminderDate,
     } = c.get('validatedQuery');
     const currentUser = c.get('user');
     const offset = (page - 1) * limit;
+
+    // 默认获取未处理的提醒记录（不限制日期）
+    const isHandled = queryIsHandled !== undefined ? queryIsHandled : false;
+    const reminderDate = queryReminderDate; // 如果不传日期，则不过滤日期
 
     // 获取用户可访问的部门ID列表
     const accessibleDepartmentIds = await getUserAccessibleDepartmentIds(

@@ -12,17 +12,21 @@ import { COLORS } from '../utils/constants';
 import { PersonStatus, Department } from '../types';
 
 type PersonType = 'employee' | 'intern' | 'manager';
+type LeaveType = 'vacation' | 'business' | 'study' | 'hospitalization' | 'care';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  currentStatus: PersonStatus | 'all';
-  onStatusChange: (status: PersonStatus | 'all') => void;
-  currentPersonType: PersonType | 'all';
-  onPersonTypeChange: (type: PersonType | 'all') => void;
-  currentDepartment: string | 'all';
-  onDepartmentChange: (departmentId: string | 'all') => void;
+  currentStatus: PersonStatus[];
+  onStatusChange: (status: PersonStatus[]) => void;
+  currentPersonType: PersonType[];
+  onPersonTypeChange: (type: PersonType[]) => void;
+  currentDepartment: string[];
+  onDepartmentChange: (departmentIds: string[]) => void;
+  currentLeaveType: LeaveType[];
+  onLeaveTypeChange: (types: LeaveType[]) => void;
   departments: Department[];
+  onReset: () => void;
 }
 
 const FilterModal: React.FC<Props> = ({
@@ -34,14 +38,33 @@ const FilterModal: React.FC<Props> = ({
   onPersonTypeChange,
   currentDepartment,
   onDepartmentChange,
+  currentLeaveType,
+  onLeaveTypeChange,
   departments,
+  onReset,
 }) => {
-  // 折叠状态管理
+  // 折叠状态管理 - 默认只展开部门筛选
   const [expandedSections, setExpandedSections] = useState({
     department: true, // 默认展开部门
-    personType: true, // 默认展开人员类型
-    status: true, // 默认展开状态
+    leaveType: false, // 默认折叠在外类别
+    personType: false, // 默认折叠人员类型
+    status: false, // 默认折叠状态
   });
+
+  // 切换选择项
+  const toggleSelection = <T,>(
+    currentSelection: T[],
+    value: T,
+    onChange: (selection: T[]) => void,
+  ) => {
+    if (currentSelection.includes(value)) {
+      // 取消选择
+      onChange(currentSelection.filter(item => item !== value));
+    } else {
+      // 添加选择
+      onChange([...currentSelection, value]);
+    }
+  };
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({
@@ -50,31 +73,32 @@ const FilterModal: React.FC<Props> = ({
     }));
   };
   const statusOptions = [
-    { value: 'all', label: '全部', color: '#6B7280' },
     { value: 'urgent', label: '紧急', color: COLORS.danger },
     { value: 'suggest', label: '建议', color: COLORS.warning },
     { value: 'normal', label: '正常', color: COLORS.success },
-    // { value: 'inactive', label: '在岗', color: '#6B7280' },
-  ];
+  ] as const;
 
   const personTypeOptions = [
-    { value: 'all', label: '全部类型', color: '#6B7280' },
     { value: 'employee', label: '员工', color: COLORS.primary },
-    // { value: 'intern', label: '实习生', color: COLORS.warning },
     { value: 'manager', label: '小组长', color: COLORS.success },
-  ];
+  ] as const;
+
+  const leaveTypeOptions = [
+    { value: 'vacation', label: '休假', color: '#10B981' },
+    { value: 'business', label: '出差', color: '#3B82F6' },
+    { value: 'study', label: '学习', color: '#8B5CF6' },
+    { value: 'hospitalization', label: '住院', color: '#EF4444' },
+    { value: 'care', label: '陪护', color: '#F59E0B' },
+  ] as const;
 
   // 过滤掉顶级部门（level为1的部门），只显示下属单位
   const filteredDepartments = departments.filter(dept => dept.level > 1);
 
-  const departmentOptions = [
-    { value: 'all', label: '全部部门', color: '#6B7280' },
-    ...filteredDepartments.map(dept => ({
-      value: dept.id,
-      label: dept.name,
-      color: COLORS.primary,
-    })),
-  ];
+  const departmentOptions = filteredDepartments.map(dept => ({
+    value: dept.id,
+    label: dept.name,
+    color: COLORS.primary,
+  }));
 
   // 调试日志（可选）
   // console.log('🏢 FilterModal departments:', departments.length, departments);
@@ -133,108 +157,165 @@ const FilterModal: React.FC<Props> = ({
           >
             {/* 部门筛选 - 放在最上面，默认展开 */}
             <CollapsibleSection title="部门筛选" sectionKey="department">
-              {departmentOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.option,
-                    currentDepartment === option.value && styles.optionActive,
-                  ]}
-                  onPress={() => {
-                    onDepartmentChange(option.value);
-                  }}
-                >
-                  <View
+              {departmentOptions.map(option => {
+                const isSelected = currentDepartment.includes(option.value);
+                return (
+                  <TouchableOpacity
+                    key={option.value}
                     style={[
-                      styles.optionDot,
-                      { backgroundColor: option.color },
+                      styles.option,
+                      isSelected && styles.optionActive,
                     ]}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      currentDepartment === option.value &&
-                        styles.optionTextActive,
-                    ]}
+                    onPress={() => {
+                      toggleSelection(currentDepartment, option.value, onDepartmentChange);
+                    }}
                   >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <View style={styles.optionLeft}>
+                      <View
+                        style={[
+                          styles.optionDot,
+                          { backgroundColor: option.color },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.optionText,
+                          isSelected && styles.optionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Icon name="check" size={16} color={COLORS.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </CollapsibleSection>
 
-            {/* 人员类型筛选 - 默认展开 */}
-            <CollapsibleSection title="人员类型" sectionKey="personType">
-              {personTypeOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.option,
-                    currentPersonType === option.value && styles.optionActive,
-                  ]}
-                  onPress={() => {
-                    onPersonTypeChange(option.value as PersonType | 'all');
-                  }}
-                >
-                  <View
+            {/* 在外类别筛选 - 默认折叠 */}
+            <CollapsibleSection title="在外类别" sectionKey="leaveType">
+              {leaveTypeOptions.map(option => {
+                const isSelected = currentLeaveType.includes(option.value as LeaveType);
+                return (
+                  <TouchableOpacity
+                    key={option.value}
                     style={[
-                      styles.optionDot,
-                      { backgroundColor: option.color },
+                      styles.option,
+                      isSelected && styles.optionActive,
                     ]}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      currentPersonType === option.value &&
-                        styles.optionTextActive,
-                    ]}
+                    onPress={() => {
+                      toggleSelection(currentLeaveType, option.value as LeaveType, onLeaveTypeChange);
+                    }}
                   >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <View style={styles.optionLeft}>
+                      <View
+                        style={[
+                          styles.optionDot,
+                          { backgroundColor: option.color },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.optionText,
+                          isSelected && styles.optionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Icon name="check" size={16} color={COLORS.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </CollapsibleSection>
+
+            {/* 人员类型筛选 - 默认折叠 */}
+            <CollapsibleSection title="人员类型" sectionKey="personType">
+              {personTypeOptions.map(option => {
+                const isSelected = currentPersonType.includes(option.value as PersonType);
+                return (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={[
+                      styles.option,
+                      isSelected && styles.optionActive,
+                    ]}
+                    onPress={() => {
+                      toggleSelection(currentPersonType, option.value as PersonType, onPersonTypeChange);
+                    }}
+                  >
+                    <View style={styles.optionLeft}>
+                      <View
+                        style={[
+                          styles.optionDot,
+                          { backgroundColor: option.color },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.optionText,
+                          isSelected && styles.optionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Icon name="check" size={16} color={COLORS.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </CollapsibleSection>
 
             {/* 状态筛选 - 默认折叠 */}
             <CollapsibleSection title="状态筛选" sectionKey="status">
-              {statusOptions.map(option => (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.option,
-                    currentStatus === option.value && styles.optionActive,
-                  ]}
-                  onPress={() => {
-                    onStatusChange(option.value as PersonStatus | 'all');
-                  }}
-                >
-                  <View
+              {statusOptions.map(option => {
+                const isSelected = currentStatus.includes(option.value as PersonStatus);
+                return (
+                  <TouchableOpacity
+                    key={option.value}
                     style={[
-                      styles.optionDot,
-                      { backgroundColor: option.color },
+                      styles.option,
+                      isSelected && styles.optionActive,
                     ]}
-                  />
-                  <Text
-                    style={[
-                      styles.optionText,
-                      currentStatus === option.value && styles.optionTextActive,
-                    ]}
+                    onPress={() => {
+                      toggleSelection(currentStatus, option.value as PersonStatus, onStatusChange);
+                    }}
                   >
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+                    <View style={styles.optionLeft}>
+                      <View
+                        style={[
+                          styles.optionDot,
+                          { backgroundColor: option.color },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.optionText,
+                          isSelected && styles.optionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </View>
+                    {isSelected && (
+                      <Icon name="check" size={16} color={COLORS.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </CollapsibleSection>
           </ScrollView>
 
           <View style={styles.actionButtons}>
             <TouchableOpacity
               style={styles.resetButton}
-              onPress={() => {
-                onStatusChange('all');
-                onPersonTypeChange('all');
-                onDepartmentChange('all');
-              }}
+              onPress={onReset}
             >
               <Text style={styles.resetButtonText}>重置</Text>
             </TouchableOpacity>
@@ -306,14 +387,19 @@ const styles = StyleSheet.create({
   option: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: '#F9FAFB',
     borderRadius: 12,
-    gap: 12,
   },
   optionActive: {
     backgroundColor: '#EEF2FF',
+  },
+  optionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   optionDot: {
     width: 12,

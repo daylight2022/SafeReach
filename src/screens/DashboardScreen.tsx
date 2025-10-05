@@ -69,19 +69,17 @@ const DashboardScreen = ({ navigation }: any) => {
         setUrgentPersons([]);
       }
 
-      // 获取今日待办
-      const today = new Date().toISOString().split('T')[0];
-      console.log('今日日期:', today); // 调试日志
+      // 获取建议关注（优先级 medium 的提醒）
       const tasksResult = await apiServices.reminder.getReminders({
-        reminderDate: today,
+        priority: 'medium',
         isHandled: false,
       });
 
       if (tasksResult.success) {
-        console.log('今日待办查询结果:', tasksResult.data); // 调试日志
+        console.log('建议关注查询结果:', tasksResult.data); // 调试日志
         setTodayTasks(tasksResult.data?.reminders || []);
       } else {
-        console.error('获取今日待办失败:', tasksResult.message);
+        console.error('获取建议关注失败:', tasksResult.message);
         setTodayTasks([]);
       }
     } catch (error) {
@@ -134,15 +132,17 @@ const DashboardScreen = ({ navigation }: any) => {
           status="urgent"
           items={urgentPersons}
           onItemPress={handleContact}
+          onContactComplete={loadDashboardData}
         />
 
-        {/* 今日待办 */}
+        {/* 建议关注 */}
         <StatusCard
-          title="今日待办"
+          title="建议关注"
           count={todayTasks.length}
           status="warning"
           items={todayTasks}
           onItemPress={handleContact}
+          onContactComplete={loadDashboardData}
         />
 
         {/* 快捷操作 */}
