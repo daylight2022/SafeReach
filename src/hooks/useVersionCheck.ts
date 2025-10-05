@@ -16,7 +16,7 @@ interface UseVersionCheckReturn {
   currentVersion: string;
   isChecking: boolean;
   showUpdateModal: boolean;
-  checkForUpdates: () => Promise<void>;
+  checkForUpdates: (silent?: boolean) => Promise<void>;
   dismissUpdate: () => void;
   showUpdate: () => void;
 }
@@ -29,10 +29,15 @@ const useVersionCheck = (): UseVersionCheckReturn => {
   const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // 检查更新的核心逻辑
-  const checkForUpdates = useCallback(async () => {
+  // silent: 是否静默检查（不显示加载状态）
+  const checkForUpdates = useCallback(async (silent: boolean = false) => {
     if (isChecking) return;
 
-    setIsChecking(true);
+    // 只有非静默模式才显示加载状态
+    if (!silent) {
+      setIsChecking(true);
+    }
+    
     try {
       // 获取当前版本信息
       const versionInfo = apiServices.version.getCurrentVersion();
@@ -77,7 +82,10 @@ const useVersionCheck = (): UseVersionCheckReturn => {
     } catch (error) {
       console.error('检查版本更新失败:', error);
     } finally {
-      setIsChecking(false);
+      // 只有非静默模式才清除加载状态
+      if (!silent) {
+        setIsChecking(false);
+      }
     }
   }, [isChecking]);
 
@@ -95,19 +103,19 @@ const useVersionCheck = (): UseVersionCheckReturn => {
     setShowUpdateModal(true);
   }, []);
 
-  // 应用启动时检查更新
+  // 应用启动时检查更新（静默）
   useEffect(() => {
     const checkOnStartup = async () => {
-      // 延迟3秒后检查，避免影响应用启动速度
+      // 延迟5秒后静默检查，避免影响应用启动速度
       setTimeout(() => {
-        checkForUpdates();
-      }, 3000);
+        checkForUpdates(true);
+      }, 5000);
     };
 
     checkOnStartup();
   }, [checkForUpdates]);
 
-  // 监听应用状态变化，从后台回到前台时检查更新
+  // 监听应用状态变化，从后台回到前台时检查更新（静默）
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
@@ -119,16 +127,15 @@ const useVersionCheck = (): UseVersionCheckReturn => {
           const timeDiff = now.getTime() - lastCheck.getTime();
           const hoursDiff = timeDiff / (1000 * 3600);
 
-          // 如果距离上次检查超过4小时，则重新检查
-          if (hoursDiff >= 4) {
-            checkForUpdates();
+          // 如果距离上次检查超过12小时，则重新检查（降低频率）
+          if (hoursDiff >= 12) {
+            checkForUpdates(true); // 静默检查
+            storage.set('lastCheckTime', new Date().toISOString());
           }
         } else {
-          checkForUpdates();
+          checkForUpdates(true); // 静默检查
+          storage.set('lastCheckTime', new Date().toISOString());
         }
-
-        // 更新最后检查时间
-        storage.set('lastCheckTime', new Date().toISOString());
       }
     };
 

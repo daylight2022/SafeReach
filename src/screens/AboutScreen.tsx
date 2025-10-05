@@ -9,6 +9,9 @@ import {
   Dimensions,
   Modal,
   ActivityIndicator,
+  Image,
+  Platform,
+  PermissionsAndroid,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import LinearGradient from 'react-native-linear-gradient';
@@ -19,6 +22,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { getAppVersionWithPrefix, getAppBuildNumber } from '@/utils/version';
 import useVersionCheck from '@/hooks/useVersionCheck';
 import UpdateModal from '@/components/UpdateModal';
+import RNFS from 'react-native-fs';
 
 const { width } = Dimensions.get('window');
 
@@ -155,6 +159,98 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
         // 显示二维码
         setShowQRCode(true);
         break;
+    }
+  };
+
+  // 请求存储权限
+  const requestStoragePermission = async (): Promise<boolean> => {
+    if (Platform.OS === 'ios') {
+      return true; // iOS 不需要请求存储权限
+    }
+
+    try {
+      const androidVersion = typeof Platform.Version === 'string' 
+        ? parseInt(Platform.Version, 10) 
+        : Platform.Version;
+        
+      if (androidVersion >= 33) {
+        // Android 13+ 不需要存储权限
+        return true;
+      }
+
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        {
+          title: '存储权限请求',
+          message: '需要存储权限来保存二维码图片',
+          buttonNeutral: '稍后询问',
+          buttonNegative: '取消',
+          buttonPositive: '确定',
+        },
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (err) {
+      console.warn('请求存储权限失败:', err);
+      return false;
+    }
+  };
+
+  // 保存二维码图片
+  const handleSaveQRCode = async () => {
+    try {
+      // 请求权限
+      const hasPermission = await requestStoragePermission();
+      if (!hasPermission) {
+        toast({ title: '需要存储权限才能保存图片', preset: 'error', duration: 2 });
+        return;
+      }
+
+      // 获取图片源路径（从 assets）
+      const imageSource = Image.resolveAssetSource(require('@/assets/qrcode.png'));
+      const imagePath = imageSource.uri;
+      
+      // 确定目标路径
+      const timestamp = new Date().getTime();
+      const fileName = `wechat_qrcode_${timestamp}.png`;
+      
+      let destPath: string;
+      if (Platform.OS === 'ios') {
+        destPath = `${RNFS.DocumentDirectoryPath}/${fileName}`;
+      } else {
+        // Android: 保存到 Pictures 目录
+        destPath = `${RNFS.PicturesDirectoryPath}/${fileName}`;
+      }
+
+      // 判断是否是 HTTP URL（开发模式）
+      if (imagePath.startsWith('http')) {
+        // 开发模式：先下载图片到临时目录
+        console.log('开发模式：下载图片...', imagePath);
+        const downloadResult = await RNFS.downloadFile({
+          fromUrl: imagePath,
+          toFile: destPath,
+        }).promise;
+
+        if (downloadResult.statusCode !== 200) {
+          throw new Error('下载图片失败');
+        }
+      } else {
+        // 生产模式：直接复制图片
+        console.log('生产模式：复制图片...', imagePath);
+        await RNFS.copyFile(imagePath, destPath);
+      }
+
+      toast({ 
+        title: '二维码已保存到相册', 
+        preset: 'done', 
+        duration: 2 
+      });
+    } catch (error) {
+      console.error('保存二维码失败:', error);
+      toast({ 
+        title: '保存失败，请重试', 
+        preset: 'error', 
+        duration: 2 
+      });
     }
   };
 
@@ -385,23 +481,40 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.qrTitle}>添加微信</Text>
             <Text style={styles.qrSubtitle}>微信号：zkdmsw_</Text>
 
-            {/* 这里应该显示二维码，暂时用占位符 */}
-            <View style={styles.qrCodePlaceholder}>
-              <Icon name="qrcode" size={80} color="#6B7280" />
-              <Text style={styles.qrPlaceholderText}>微信二维码</Text>
-              <Text style={styles.qrPlaceholderSubtext}>请扫码添加微信</Text>
-            </View>
-
+            {/* 二维码图片 */}
             <TouchableOpacity
-              style={styles.qrCopyButton}
-              onPress={() => {
-                Clipboard.setString('zkdmsw_');
-                toast({ title: '微信号已复制', preset: 'done', duration: 2 });
-              }}
+              onLongPress={handleSaveQRCode}
+              activeOpacity={0.8}
+              delayLongPress={500}
             >
-              <Icon name="copy" size={16} color={COLORS.primary} />
-              <Text style={styles.qrCopyText}>复制微信号</Text>
+              <Image
+                source={require('@/assets/qrcode.png')}
+                style={styles.qrCodeImage}
+                resizeMode="contain"
+              />
+              <Text style={styles.qrLongPressHint}>长按图片保存</Text>
             </TouchableOpacity>
+
+            <View style={styles.qrButtonGroup}>
+              <TouchableOpacity
+                style={styles.qrActionButton}
+                onPress={() => {
+                  Clipboard.setString('zkdmsw_');
+                  toast({ title: '微信号已复制', preset: 'done', duration: 2 });
+                }}
+              >
+                <Icon name="copy" size={16} color={COLORS.primary} />
+                <Text style={styles.qrActionText}>复制微信号</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.qrActionButton}
+                onPress={handleSaveQRCode}
+              >
+                <Icon name="download" size={16} color={COLORS.primary} />
+                <Text style={styles.qrActionText}>保存图片</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -810,39 +923,37 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 24,
   },
-  qrCodePlaceholder: {
-    width: 200,
-    height: 200,
-    backgroundColor: '#F9FAFB',
+  qrCodeImage: {
+    width: 240,
+    height: 240,
     borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
+    backgroundColor: COLORS.white,
+    padding: 8,
   },
-  qrPlaceholderText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#6B7280',
-    marginTop: 12,
-  },
-  qrPlaceholderSubtext: {
+  qrLongPressHint: {
     fontSize: 12,
     color: '#9CA3AF',
-    marginTop: 4,
+    marginTop: 8,
+    marginBottom: 16,
+    textAlign: 'center',
   },
-  qrCopyButton: {
+  qrButtonGroup: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  qrActionButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
     backgroundColor: '#EEF2FF',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 12,
   },
-  qrCopyText: {
+  qrActionText: {
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.primary,
