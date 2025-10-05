@@ -107,60 +107,68 @@ jobs:
         id: release_notes
         if: steps.version_info.outputs.should_sync == 'true'
         run: |
-          # 创建临时文件来处理复杂的 commit 解析
-          cat > parse_commits.sh << 'SCRIPT'
-          #!/bin/bash
-
-          # 获取最近的提交信息，过滤版本相关提交
-          git log --pretty=format:"%H" --no-merges -5 | while read commit_hash; do
+          # 直接生成发布说明文件
+          echo "## 版本 ${{ steps.version_info.outputs.version }}" > release_notes.txt
+          echo "" >> release_notes.txt
+          echo "### 更新内容" >> release_notes.txt
+          
+          # 解析最近的提交并直接写入文件
+          PROCESSED_COUNT=0
+          
+          # 使用进程替换而不是管道，避免子shell问题
+          while read -r commit_hash; do
             # 获取 commit 的 subject 和 body
-            subject=$(git log --format="%s" -n 1 $commit_hash)
-            body=$(git log --format="%b" -n 1 $commit_hash)
-
+            subject=$(git log --format="%s" -n 1 "$commit_hash")
+            body=$(git log --format="%b" -n 1 "$commit_hash")
+            
             # 跳过版本相关的提交
             if [[ "$subject" =~ ^(version:|Version|v[0-9]) ]]; then
               continue
             fi
-
+            
             # 处理 conventional commits
             if [[ "$subject" =~ ^(fix|feat|chore|docs|style|refactor|test|perf):[[:space:]]* ]]; then
-              # 提取描述部分（去掉类型前缀）
-              desc=$(echo "$subject" | sed 's/^[^:]*:[[:space:]]*//')
-              echo "- $desc"
-
+              # 提取描述部分（去掉类型前缀和末尾标点）
+              desc=$(echo "$subject" | sed 's/^[^:]*:[[:space:]]*//' | sed 's/[;；,，。.]*$//')
+              # 主标题不带 "-"，直接写入
+              echo "$desc" >> release_notes.txt
+              
               # 处理 body 中的列表项
               if [ -n "$body" ]; then
-                echo "$body" | while IFS= read -r line; do
+                # 使用临时数组存储body内容，避免嵌套while循环问题
+                IFS=$'\n' read -d '' -r -a body_lines <<< "$body" || true
+                
+                for line in "${body_lines[@]}"; do
+                  # 跳过空行
+                  if [ -z "$line" ] || [[ "$line" =~ ^[[:space:]]*$ ]]; then
+                    continue
+                  fi
+                  
                   # 匹配以 "- " 开头的行
                   if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+ ]]; then
-                    # 清理并格式化为子项
-                    clean_item=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//')
+                    # 清理并格式化为子项，移除末尾多余标点
+                    clean_item=$(echo "$line" | sed 's/^[[:space:]]*-[[:space:]]*//' | sed 's/[;；]*$//')
                     if [ -n "$clean_item" ]; then
-                      echo "  - $clean_item"
+                      echo "- $clean_item" >> release_notes.txt
                     fi
                   fi
                 done
               fi
+              
+              PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
             else
               # 非 conventional commit，直接使用 subject
-              echo "- $subject"
+              echo "- $subject" >> release_notes.txt
+              PROCESSED_COUNT=$((PROCESSED_COUNT + 1))
             fi
-          done
-          SCRIPT
-
-          chmod +x parse_commits.sh
-          FORMATTED_COMMITS=$(./parse_commits.sh)
-
-          # 如果没有提交，使用默认消息
-          if [ -z "$FORMATTED_COMMITS" ]; then
-            FORMATTED_COMMITS="- 版本更新和bug修复"
+          done < <(git log --pretty=format:"%H" --no-merges -5)
+          
+          # 如果没有处理任何提交，添加默认消息
+          if [ "$PROCESSED_COUNT" -eq 0 ]; then
+            echo "版本更新和bug修复" >> release_notes.txt
           fi
-
-          # 创建发布说明，确保换行格式正确
-          echo "## 版本 ${{ steps.version_info.outputs.version }}" > release_notes.txt
-          echo "" >> release_notes.txt
-          echo "### 更新内容" >> release_notes.txt
-          echo -e "$FORMATTED_COMMITS" >> release_notes.txt
+          
+          # 继续添加其他信息
           echo "" >> release_notes.txt
           echo "### 发布时间" >> release_notes.txt
           echo "$(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')" >> release_notes.txt
@@ -168,7 +176,7 @@ jobs:
           echo "### 版本类型" >> release_notes.txt
           echo "${{ steps.update_type.outputs.update_type }} 更新" >> release_notes.txt
 
-          echo "Release notes generated"
+          echo "Release notes generated successfully"
           echo "Generated content:"
           cat release_notes.txt
 
