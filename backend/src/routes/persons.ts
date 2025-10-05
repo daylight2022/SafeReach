@@ -446,20 +446,41 @@ personsRouter.delete(
       const { id } = c.get('validatedParams');
       const currentUser = c.get('user');
 
-      // 只有管理员可以删除人员
-      if (currentUser.role !== 'admin') {
+      // 管理员可以删除所有人员，操作员只能删除同部门的人员
+      if (currentUser.role !== 'admin' && currentUser.role !== 'operator') {
         return errorResponse(c, '权限不足', 403);
       }
 
       // 检查人员是否存在
       const existingPerson = await db
-        .select({ id: persons.id })
+        .select({ 
+          id: persons.id,
+          departmentId: persons.departmentId 
+        })
         .from(persons)
         .where(eq(persons.id, id))
         .limit(1);
 
       if (existingPerson.length === 0) {
         return notFoundResponse(c, '人员不存在');
+      }
+
+      // 如果是操作员，需要检查是否同部门
+      if (currentUser.role === 'operator') {
+        // 获取用户可访问的部门ID列表
+        const accessibleDepartmentIds = await getUserAccessibleDepartmentIds(
+          currentUser.userId,
+          currentUser.role,
+          currentUser.departmentId,
+        );
+
+        // 检查目标人员的部门是否在可访问列表中
+        if (
+          !existingPerson[0].departmentId ||
+          !accessibleDepartmentIds.includes(existingPerson[0].departmentId)
+        ) {
+          return errorResponse(c, '只能删除本部门的人员', 403);
+        }
       }
 
       // 删除人员（级联删除相关记录）

@@ -29,4 +29,6 @@ export const LEAVE_TYPES = {
   vacation: '休假',
   business: '出差',
   study: '学习',
+  hospitalization: '住院',
+  care: '陪护',
 };

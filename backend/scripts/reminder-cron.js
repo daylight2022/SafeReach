@@ -146,7 +146,7 @@ async function processLeaveReminders(currentDate) {
           leaveId: leave.id,
           reminderType: 'before',
           reminderDate: currentDate,
-          priority: 'high',
+          priority: 'medium',
           isHandled: false,
         });
         console.log(`📋 创建休假前提醒: ${leave.personName} (明日开始休假)`);
@@ -161,27 +161,27 @@ async function processLeaveReminders(currentDate) {
           leaveId: leave.id,
           reminderType: 'ending',
           reminderDate: currentDate,
-          priority: 'high',
+          priority: 'medium',
           isHandled: false,
         });
         console.log(`📋 创建休假结束前提醒: ${leave.personName} (明日结束休假)`);
       }
 
       // 休假中提醒（休假期间每3天提醒一次）
-      if (current >= startDate && current <= endDate) {
-        const daysSinceStart = Math.floor((current.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (daysSinceStart > 0 && daysSinceStart % 3 === 0) {
-          await db.insert(reminders).values({
-            personId: leave.personId,
-            leaveId: leave.id,
-            reminderType: 'during',
-            reminderDate: currentDate,
-            priority: 'medium',
-            isHandled: false,
-          });
-          console.log(`📋 创建休假中提醒: ${leave.personName} (休假第${daysSinceStart + 1}天)`);
-        }
-      }
+      // if (current >= startDate && current <= endDate) {
+      //   const daysSinceStart = Math.floor((current.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+      //   if (daysSinceStart > 0 && daysSinceStart % 3 === 0) {
+      //     await db.insert(reminders).values({
+      //       personId: leave.personId,
+      //       leaveId: leave.id,
+      //       reminderType: 'during',
+      //       reminderDate: currentDate,
+      //       priority: 'medium',
+      //       isHandled: false,
+      //     });
+      //     console.log(`📋 创建休假中提醒: ${leave.personName} (休假第${daysSinceStart + 1}天)`);
+      //   }
+      // }
     }
   } catch (error) {
     console.error('❌ 处理休假提醒失败:', error);

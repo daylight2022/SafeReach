@@ -31,9 +31,9 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
   const [departmentName, setDepartmentName] = useState<string>('');
   const [appVersion, setAppVersion] = useState<string>('v1.0.0');
   const [statistics, setStatistics] = useState({
-    managedPersons: 0,
-    monthlyContacts: 0,
-    timelyRate: 0,
+    activePersons: 0,       // 在假人数
+    monthlyContacts: 0,     // 本月联系次数
+    onTimeRate: 0,          // 及时处理率
   });
 
   useEffect(() => {
@@ -86,30 +86,36 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
 
   const loadStatistics = async () => {
     try {
-      // 使用新的统计服务获取个人统计数据
-      const result = await statisticsService.getStatistics();
+      // 计算本月时间范围
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const startDate = startOfMonth.toISOString().split('T')[0];
+      const endDate = now.toISOString().split('T')[0];
+
+      // 使用统计服务获取本月数据
+      const result = await statisticsService.getStatistics(startDate, endDate);
 
       if (result.success && result.data) {
         setStatistics({
-          managedPersons: result.data.managedPersons || 0,
-          monthlyContacts: result.data.monthlyContacts || 0,
-          timelyRate: result.data.timelyRate || 98,
+          activePersons: result.data.activePersons || 0,
+          monthlyContacts: result.data.totalContacts || 0,
+          onTimeRate: result.data.responseMetrics?.onTimeRate || 0,
         });
       } else {
         // 如果统计服务失败，设置默认值
         setStatistics({
-          managedPersons: 0,
+          activePersons: 0,
           monthlyContacts: 0,
-          timelyRate: 98,
+          onTimeRate: 0,
         });
       }
     } catch (error) {
       console.error('Load statistics error:', error);
       // 设置默认值
       setStatistics({
-        managedPersons: 0,
+        activePersons: 0,
         monthlyContacts: 0,
-        timelyRate: 98,
+        onTimeRate: 0,
       });
     }
   };
@@ -228,9 +234,9 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
         <View style={styles.statsCard}>
           <View style={styles.statsItem}>
             <Text style={[styles.statsValue, { color: COLORS.primary }]}>
-              {statistics.managedPersons}
+              {statistics.activePersons}
             </Text>
-            <Text style={styles.statsLabel}>负责人数</Text>
+            <Text style={styles.statsLabel}>在假人数</Text>
           </View>
           <View style={styles.statsItem}>
             <Text style={[styles.statsValue, { color: COLORS.success }]}>
@@ -240,9 +246,9 @@ const ProfileScreen: React.FC<Props> = ({ navigation }) => {
           </View>
           <View style={styles.statsItem}>
             <Text style={[styles.statsValue, { color: COLORS.warning }]}>
-              {statistics.timelyRate}%
+              {statistics.onTimeRate}%
             </Text>
-            <Text style={styles.statsLabel}>及时率</Text>
+            <Text style={styles.statsLabel}>及时处理率</Text>
           </View>
         </View>
 

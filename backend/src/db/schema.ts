@@ -112,7 +112,7 @@ export const leaves = pgTable(
   table => ({
     leaveTypeCheck: check(
       'leave_type_check',
-      sql`${table.leaveType} IN ('vacation', 'business', 'study', 'hospitalization')`,
+      sql`${table.leaveType} IN ('vacation', 'business', 'study', 'hospitalization', 'care')`,
     ),
     statusCheck: check(
       'status_check',

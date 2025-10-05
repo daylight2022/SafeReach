@@ -72,7 +72,8 @@ const PersonCard: React.FC<Props> = ({ person, onPress, onContact }) => {
 
   const getDaysSinceContact = () => {
     if (!lastContact) return null;
-    return dayjs().diff(dayjs(lastContact.contactDate), 'days');
+    // 使用 startOf('day') 按日历日期计算，而不是绝对24小时
+    return dayjs().startOf('day').diff(dayjs(lastContact.contactDate).startOf('day'), 'days');
   };
 
   const getHumanizedContactTime = () => {
@@ -137,7 +138,11 @@ const PersonCard: React.FC<Props> = ({ person, onPress, onContact }) => {
                       ? '休假中'
                       : currentLeave.leaveType === 'business'
                       ? '出差中'
-                      : '学习中'
+                      : currentLeave.leaveType === 'study'
+                      ? '学习中'
+                      : currentLeave.leaveType === 'hospitalization'
+                      ? '住院中'
+                      : '陪护中'
                   } · ${truncateLocation(currentLeave.location || '')}`
                 : '未在假'}
             </Text>

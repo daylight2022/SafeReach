@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, and, count, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db/connection.js';
-import { persons, contacts, leaves, reminders, users } from '../db/schema.js';
+import { persons, contacts, leaves, reminders, users, departments } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validateQuery } from '../middleware/validation.js';
 import { StatisticsQuerySchema } from '../types/index.js';
@@ -139,9 +139,72 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       personCount,
     );
 
-    // 计算状态分布
-    const statusDistribution =
-      ResponseCalculator.calculateStatusDistribution(metrics);
+    // 计算人员状态分布（带人数）
+    const allPersons = await db
+      .select({
+        id: persons.id,
+        lastContactDate: persons.lastContactDate,
+        currentLeave: leaves,
+      })
+      .from(persons)
+      .leftJoin(
+        leaves,
+        and(
+          eq(leaves.personId, persons.id),
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, new Date().toISOString().split('T')[0]),
+        ),
+      )
+      .where(departmentFilter);
+
+    // 计算每个人的状态（只统计在假人员）
+    let normalCount = 0;
+    let suggestCount = 0;
+    let urgentCount = 0;
+    let activePersons = 0; // 在假人员数量
+
+    for (const person of allPersons) {
+      // 只统计有活跃假期的人员
+      if (!person.currentLeave) {
+        continue;
+      }
+
+      activePersons++;
+
+      if (!person.lastContactDate) {
+        urgentCount++;
+        continue;
+      }
+
+      const daysSinceContact = Math.floor(
+        (new Date().getTime() - new Date(person.lastContactDate).getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+
+      if (daysSinceContact > 7) {
+        urgentCount++;
+      } else if (daysSinceContact > 3) {
+        suggestCount++;
+      } else {
+        normalCount++;
+      }
+    }
+
+    // 状态分布只包含在假人员的三种状态
+    const statusDistribution = {
+      normal: {
+        count: normalCount,
+        percentage: activePersons > 0 ? Math.round((normalCount / activePersons) * 100) : 0,
+      },
+      suggest: {
+        count: suggestCount,
+        percentage: activePersons > 0 ? Math.round((suggestCount / activePersons) * 100) : 0,
+      },
+      urgent: {
+        count: urgentCount,
+        percentage: activePersons > 0 ? Math.round((urgentCount / activePersons) * 100) : 0,
+      },
+    };
 
     // 获取最近7天的联系趋势
     const weeklyData = [];
@@ -168,22 +231,94 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       weeklyData.push(dailyCount);
     }
 
-    return successResponse(c, {
+    // 计算提醒处理率
+    const reminderProcessRate =
+      metrics.totalReminders > 0
+        ? Math.round(
+            ((metrics.handledOnTime + metrics.handledLate) /
+              metrics.totalReminders) *
+              100,
+          )
+        : 100;
+
+    // 计算及时处理率
+    const onTimeRate =
+      metrics.totalReminders > 0
+        ? Math.round((metrics.handledOnTime / metrics.totalReminders) * 100)
+        : 100;
+
+    // 计算健康度评分
+    const healthScore = calculateHealthScore({
+      onTimeRate,
+      reminderProcessRate,
+      urgentPercentage: activePersons > 0 ? (urgentCount / activePersons) * 100 : 0,
+      proactiveRate: contactCount > 0 ? (metrics.proactiveContacts / contactCount) * 100 : 0,
+      unhandledReminders: metrics.unhandledReminders,
+    });
+    console.log('🏥 健康度评分:', healthScore);
+
+    // 获取上期数据用于趋势对比
+    const previousPeriod = getPreviousPeriod(timeRangeStart, timeRangeEnd);
+    console.log('📅 上期时间范围:', previousPeriod);
+    
+    const previousMetrics = await calculatePreviousMetrics(
+      previousPeriod.start,
+      previousPeriod.end,
+      departmentFilter,
+    );
+    console.log('📊 上期指标:', previousMetrics);
+
+    // 计算趋势
+    const trends = {
+      onTimeRate: calculateTrend(onTimeRate, previousMetrics.onTimeRate),
+      urgentCount: calculateTrend(urgentCount, previousMetrics.urgentCount),
+      unhandledReminders: calculateTrend(
+        metrics.unhandledReminders,
+        previousMetrics.unhandledReminders,
+      ),
+    };
+    console.log('📈 趋势数据:', trends);
+
+    // 获取部门排名（管理员可见多部门）
+    let departmentRanking = [];
+    console.log('👤 用户角色:', currentUser.role);
+    if (currentUser.role === 'admin') {
+      console.log('🔍 管理员查询所有部门排名...');
+      departmentRanking = await getDepartmentRanking(timeRangeStart, timeRangeEnd);
+    } else {
+      console.log('🔍 普通用户仅显示当前部门...');
+      departmentRanking = [
+        {
+          departmentId: currentUser.departmentId || '',
+          name: '当前部门',
+          reminderProcessRate,
+          onTimeRate,
+          urgentCount,
+          totalReminders: metrics.totalReminders,
+          unhandledReminders: metrics.unhandledReminders,
+        },
+      ];
+    }
+    console.log('🏆 部门排名结果:', departmentRanking);
+
+    const responseData = {
       totalContacts: contactCount,
       totalPersons: personCount,
-      avgResponseDays: metrics.avgResponseDays,
-      avgFrequency: (contactCount / Math.max(personCount, 1)).toFixed(1),
+      activePersons: activePersons,
       weeklyData,
       statusDistribution,
-      departmentRanking: [
-        {
-          name: '当前部门',
-          avgResponse: metrics.avgResponseDays,
-          percentage: metrics.totalScore,
-        },
-      ],
-      responseMetrics: metrics,
-    });
+      departmentRanking,
+      responseMetrics: {
+        ...metrics,
+        reminderProcessRate,
+        onTimeRate,
+      },
+      healthScore,
+      trends,
+    };
+    
+    console.log('✅ 最终返回数据:', JSON.stringify(responseData, null, 2));
+    return successResponse(c, responseData);
   } catch (error) {
     console.error('获取统计数据失败:', error);
     return serverErrorResponse(c, error);
@@ -543,5 +678,304 @@ statisticsRouter.get('/personal', async c => {
     return serverErrorResponse(c, error);
   }
 });
+
+/**
+ * 计算健康度评分
+ * 基于多个指标综合计算：及时处理率40% + 提醒处理率30% + 非紧急占比20% + 主动联系率10%
+ */
+function calculateHealthScore(params: {
+  onTimeRate: number;
+  reminderProcessRate: number;
+  urgentPercentage: number;
+  proactiveRate: number;
+  unhandledReminders: number;
+}): number {
+  const { onTimeRate, reminderProcessRate, urgentPercentage, proactiveRate, unhandledReminders } = params;
+  
+  // 基础分数计算
+  let score =
+    onTimeRate * 0.4 +
+    reminderProcessRate * 0.3 +
+    (100 - urgentPercentage) * 0.2 +
+    Math.min(proactiveRate, 100) * 0.1;
+
+  // 未处理提醒惩罚
+  if (unhandledReminders > 0) {
+    score -= Math.min(unhandledReminders * 2, 20); // 每个未处理提醒扣2分，最多扣20分
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+/**
+ * 获取上期时间范围
+ */
+function getPreviousPeriod(
+  start: Date,
+  end: Date,
+): { start: Date; end: Date } {
+  const duration = end.getTime() - start.getTime();
+  const previousEnd = new Date(start.getTime() - 1);
+  const previousStart = new Date(previousEnd.getTime() - duration);
+  
+  return { start: previousStart, end: previousEnd };
+}
+
+/**
+ * 计算上期指标
+ */
+async function calculatePreviousMetrics(
+  startDate: Date,
+  endDate: Date,
+  departmentFilter: any,
+): Promise<{ onTimeRate: number; urgentCount: number; unhandledReminders: number }> {
+  try {
+    // 获取上期提醒数据
+    const previousReminders = await db
+      .select({
+        isHandled: reminders.isHandled,
+        handledAt: reminders.handledAt,
+        reminderDate: reminders.reminderDate,
+        createdAt: reminders.createdAt,
+      })
+      .from(reminders)
+      .leftJoin(persons, eq(reminders.personId, persons.id))
+      .where(
+        and(
+          gte(reminders.reminderDate, startDate.toISOString().split('T')[0]),
+          lte(reminders.reminderDate, endDate.toISOString().split('T')[0]),
+          departmentFilter,
+        ),
+      );
+
+    // 计算及时处理的数量
+    let handledOnTime = 0;
+    let unhandledReminders = 0;
+
+    for (const reminder of previousReminders) {
+      if (!reminder.isHandled) {
+        unhandledReminders++;
+      } else if (reminder.handledAt) {
+        const reminderDate = new Date(reminder.reminderDate);
+        const handledDate = new Date(reminder.handledAt);
+        const delayDays = Math.floor(
+          (handledDate.getTime() - reminderDate.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        if (delayDays <= 0) {
+          handledOnTime++;
+        }
+      }
+    }
+
+    const onTimeRate =
+      previousReminders.length > 0
+        ? Math.round((handledOnTime / previousReminders.length) * 100)
+        : 100;
+
+    // 获取上期紧急人数
+    const previousPersons = await db
+      .select({
+        id: persons.id,
+        lastContactDate: persons.lastContactDate,
+        currentLeave: leaves,
+      })
+      .from(persons)
+      .leftJoin(
+        leaves,
+        and(
+          eq(leaves.personId, persons.id),
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, startDate.toISOString().split('T')[0]),
+          lte(leaves.startDate, endDate.toISOString().split('T')[0]),
+        ),
+      )
+      .where(departmentFilter);
+
+    let urgentCount = 0;
+    for (const person of previousPersons) {
+      if (!person.currentLeave) continue;
+      if (!person.lastContactDate) {
+        urgentCount++;
+        continue;
+      }
+      const daysSinceContact = Math.floor(
+        (endDate.getTime() - new Date(person.lastContactDate).getTime()) /
+          (1000 * 60 * 60 * 24),
+      );
+      if (daysSinceContact > 7) {
+        urgentCount++;
+      }
+    }
+
+    return { onTimeRate, urgentCount, unhandledReminders };
+  } catch (error) {
+    console.error('计算上期指标失败:', error);
+    return { onTimeRate: 0, urgentCount: 0, unhandledReminders: 0 };
+  }
+}
+
+/**
+ * 计算趋势
+ */
+function calculateTrend(
+  current: number,
+  previous: number,
+): { current: number; previous: number; change: number; trend: 'up' | 'down' | 'stable' } {
+  const change = current - previous;
+  let trend: 'up' | 'down' | 'stable' = 'stable';
+  
+  if (Math.abs(change) > 0) {
+    trend = change > 0 ? 'up' : 'down';
+  }
+
+  return {
+    current,
+    previous,
+    change: Math.abs(change),
+    trend,
+  };
+}
+
+/**
+ * 获取所有部门的排名（仅管理员）
+ */
+async function getDepartmentRanking(
+  startDate: Date,
+  endDate: Date,
+): Promise<Array<{
+  departmentId: string;
+  name: string;
+  reminderProcessRate: number;
+  onTimeRate: number;
+  urgentCount: number;
+  totalReminders: number;
+  unhandledReminders: number;
+}>> {
+  try {
+    // 获取所有有人员的部门
+    const deptList = await db
+      .select({
+        id: departments.id,
+        name: departments.name,
+      })
+      .from(departments)
+      .leftJoin(persons, eq(departments.id, persons.departmentId))
+      .where(sql`${persons.id} IS NOT NULL`)
+      .groupBy(departments.id, departments.name);
+
+    console.log('📋 找到的部门列表:', deptList);
+
+    const ranking = [];
+
+    for (const dept of deptList) {
+      const deptFilter = eq(persons.departmentId, dept.id);
+      
+      console.log(`📊 处理部门: ${dept.name} (${dept.id})`);
+
+      // 获取该部门的提醒数据
+      const deptReminders = await db
+        .select({
+          isHandled: reminders.isHandled,
+          handledAt: reminders.handledAt,
+          reminderDate: reminders.reminderDate,
+        })
+        .from(reminders)
+        .leftJoin(persons, eq(reminders.personId, persons.id))
+        .where(
+          and(
+            gte(reminders.reminderDate, startDate.toISOString().split('T')[0]),
+            lte(reminders.reminderDate, endDate.toISOString().split('T')[0]),
+            deptFilter,
+          ),
+        );
+
+      let handledOnTime = 0;
+      let unhandledReminders = 0;
+
+      for (const reminder of deptReminders) {
+        if (!reminder.isHandled) {
+          unhandledReminders++;
+        } else if (reminder.handledAt) {
+          const reminderDate = new Date(reminder.reminderDate);
+          const handledDate = new Date(reminder.handledAt);
+          const delayDays = Math.floor(
+            (handledDate.getTime() - reminderDate.getTime()) / (1000 * 60 * 60 * 24),
+          );
+          if (delayDays <= 0) {
+            handledOnTime++;
+          }
+        }
+      }
+
+      const totalReminders = deptReminders.length;
+      const onTimeRate =
+        totalReminders > 0 ? Math.round((handledOnTime / totalReminders) * 100) : 100;
+      const reminderProcessRate =
+        totalReminders > 0
+          ? Math.round(((totalReminders - unhandledReminders) / totalReminders) * 100)
+          : 100;
+
+      // 获取紧急人数
+      const deptPersons = await db
+        .select({
+          id: persons.id,
+          lastContactDate: persons.lastContactDate,
+          currentLeave: leaves,
+        })
+        .from(persons)
+        .leftJoin(
+          leaves,
+          and(
+            eq(leaves.personId, persons.id),
+            eq(leaves.status, 'active'),
+            gte(leaves.endDate, new Date().toISOString().split('T')[0]),
+          ),
+        )
+        .where(deptFilter);
+
+      let urgentCount = 0;
+      for (const person of deptPersons) {
+        if (!person.currentLeave) continue;
+        if (!person.lastContactDate) {
+          urgentCount++;
+          continue;
+        }
+        const daysSinceContact = Math.floor(
+          (new Date().getTime() - new Date(person.lastContactDate).getTime()) /
+            (1000 * 60 * 60 * 24),
+        );
+        if (daysSinceContact > 7) {
+          urgentCount++;
+        }
+      }
+
+      const deptData = {
+        departmentId: dept.id,
+        name: dept.name,
+        reminderProcessRate,
+        onTimeRate,
+        urgentCount,
+        totalReminders,
+        unhandledReminders,
+      };
+      
+      console.log(`✅ 部门数据:`, deptData);
+      ranking.push(deptData);
+    }
+
+    // 按综合得分排序：及时处理率40% + 提醒处理率30% + 低紧急人数30%
+    ranking.sort((a, b) => {
+      const scoreA = a.onTimeRate * 0.4 + a.reminderProcessRate * 0.3 + (10 - Math.min(a.urgentCount, 10)) * 3;
+      const scoreB = b.onTimeRate * 0.4 + b.reminderProcessRate * 0.3 + (10 - Math.min(b.urgentCount, 10)) * 3;
+      return scoreB - scoreA;
+    });
+
+    console.log('📊 最终部门排名:', ranking);
+    return ranking;
+  } catch (error) {
+    console.error('获取部门排名失败:', error);
+    return [];
+  }
+}
 
 export default statisticsRouter;

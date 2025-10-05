@@ -11,7 +11,6 @@ import {
   Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
-import LinearGradient from 'react-native-linear-gradient';
 import { NavigationProp, RouteProp } from '@react-navigation/native';
 import {
   personService,
@@ -38,6 +37,15 @@ import { ParsedLeaveInfo } from '@/utils/textParser';
 const PERSON_TYPES = [
   { value: 'employee', label: '员工' },
   { value: 'manager', label: '小组长' },
+];
+
+// 在外类型选项
+const LEAVE_TYPES = [
+  { value: 'vacation', label: '休假' },
+  { value: 'business', label: '出差' },
+  { value: 'study', label: '学习' },
+  { value: 'hospitalization', label: '住院' },
+  { value: 'care', label: '陪护' },
 ];
 
 interface Props {
@@ -72,7 +80,8 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
       | 'vacation'
       | 'business'
       | 'study'
-      | 'hospitalization',
+      | 'hospitalization'
+      | 'care',
     location: '',
     startDate: new Date(),
     endDate: new Date(),
@@ -84,6 +93,7 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const [showDepartmentModal, setShowDepartmentModal] = useState(false);
   const [showPersonTypeModal, setShowPersonTypeModal] = useState(false);
+  const [showLeaveTypeModal, setShowLeaveTypeModal] = useState(false);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [showSmartParser, setShowSmartParser] = useState(false);
@@ -507,37 +517,21 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={styles.sectionTitle}>在外信息</Text>
           <View style={styles.formGroup}>
             <Text style={styles.label}>在外类型</Text>
-            <View style={styles.typeSelector}>
-              {(
-                ['vacation', 'business', 'study', 'hospitalization'] as const
-              ).map(type => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.typeOption,
-                    leaveData.leaveType === type && styles.typeOptionActive,
-                  ]}
-                  onPress={() =>
-                    setLeaveData({ ...leaveData, leaveType: type })
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.typeText,
-                      leaveData.leaveType === type && styles.typeTextActive,
-                    ]}
-                  >
-                    {type === 'vacation'
-                      ? '休假'
-                      : type === 'business'
-                      ? '出差'
-                      : type === 'study'
-                      ? '学习'
-                      : '住院'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <TouchableOpacity
+              style={styles.input}
+              onPress={() => setShowLeaveTypeModal(true)}
+            >
+              <Text
+                style={[
+                  styles.inputText,
+                  !leaveData.leaveType && styles.placeholderText,
+                ]}
+              >
+                {LEAVE_TYPES.find(type => type.value === leaveData.leaveType)
+                  ?.label || '请选择在外类型'}
+              </Text>
+              <Icon name="chevron-down" size={14} color={COLORS.darkGray} />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.formGroup}>
@@ -887,6 +881,59 @@ const AddPersonScreen: React.FC<Props> = ({ navigation, route }) => {
                   {type.label}
                 </Text>
                 {formData.personType === type.value && (
+                  <Icon name="check" size={16} color={COLORS.primary} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* 在外类型选择模态框 */}
+      <Modal
+        visible={showLeaveTypeModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowLeaveTypeModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowLeaveTypeModal(false)}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>选择在外类型</Text>
+            {LEAVE_TYPES.map(type => (
+              <TouchableOpacity
+                key={type.value}
+                style={[
+                  styles.modalOption,
+                  leaveData.leaveType === type.value &&
+                    styles.modalOptionSelected,
+                ]}
+                onPress={() => {
+                  setLeaveData({
+                    ...leaveData,
+                    leaveType: type.value as
+                      | 'vacation'
+                      | 'business'
+                      | 'study'
+                      | 'hospitalization'
+                      | 'care',
+                  });
+                  setShowLeaveTypeModal(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.modalOptionText,
+                    leaveData.leaveType === type.value &&
+                      styles.modalOptionTextSelected,
+                  ]}
+                >
+                  {type.label}
+                </Text>
+                {leaveData.leaveType === type.value && (
                   <Icon name="check" size={16} color={COLORS.primary} />
                 )}
               </TouchableOpacity>

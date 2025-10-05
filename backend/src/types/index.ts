@@ -8,6 +8,7 @@ export const LeaveType = z.enum([
   'business',
   'study',
   'hospitalization',
+  'care',
 ]);
 export const LeaveStatus = z.enum(['active', 'completed', 'cancelled']);
 export const ContactMethod = z.enum(['phone', 'message', 'visit']);

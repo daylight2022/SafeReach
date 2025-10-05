@@ -315,7 +315,9 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     ? '出差'
                     : currentLeave.leaveType === 'study'
                     ? '学习'
-                    : '住院'}
+                    : currentLeave.leaveType === 'hospitalization'
+                    ? '住院'
+                    : '陪护'}
                 </Text>
               </View>
               <View style={styles.infoItem}>

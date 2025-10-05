@@ -64,7 +64,7 @@ export interface Person {
 export interface Leave {
   id: string;
   personId: string;
-  leaveType: 'vacation' | 'business' | 'study' | 'hospitalization';
+  leaveType: 'vacation' | 'business' | 'study' | 'hospitalization' | 'care';
   location?: string;
   startDate: string;
   endDate: string;
