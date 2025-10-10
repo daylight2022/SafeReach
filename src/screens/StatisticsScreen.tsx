@@ -30,19 +30,6 @@ interface Props {
   navigation: NavigationProp<any>;
 }
 
-interface TrendData {
-  current: number;
-  previous: number;
-  change: number;
-  trend: 'up' | 'down' | 'stable';
-}
-
-interface Trends {
-  avgContactInterval: TrendData;
-  urgentCount: TrendData;
-  unhandledReminders: TrendData;
-}
-
 interface ReminderSettings {
   urgentThreshold: number;
   suggestThreshold: number;
@@ -77,7 +64,6 @@ interface Statistics {
     totalPersonsWithReminders: number;
     avgContactInterval: number;
   };
-  trends?: Trends;
 }
 
 const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
@@ -96,11 +82,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
     },
     departmentRanking: [],
     healthScore: 0,
-    trends: {
-      avgContactInterval: { current: 0, previous: 0, change: 0, trend: 'stable' },
-      urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
-      unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
-    },
   });
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -157,28 +138,28 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
               
               <View style={styles.modalBody}>
                 <Text style={styles.ruleDescription}>
-                  基于联系间隔的扣分制（满分100分，含1天宽容期）
+                  基于联系间隔的扣分制（满分100分）
                 </Text>
                 <Text style={{fontSize: 13, color: '#6B7280', marginBottom: 12}}>
-                  💡 综合统计所有联系间隔的平均值
+                  💡 综合统计当前在假人员的联系间隔平均值
                 </Text>
                 <View style={styles.ruleList}>
                   <View style={styles.ruleItem}>
                     <View style={[styles.ruleDot, { backgroundColor: COLORS.success }]} />
                 <Text style={styles.ruleText}>
-                  联系间隔≤8天（7天+1天宽容）：不扣分
+                  联系间隔≤7天：不扣分
                 </Text>
               </View>
               <View style={styles.ruleItem}>
                 <View style={[styles.ruleDot, { backgroundColor: COLORS.warning }]} />
                 <Text style={styles.ruleText}>
-                  联系间隔9-11天：每多一天扣1分
+                  联系间隔8-10天：每多一天扣1分
                 </Text>
               </View>
               <View style={styles.ruleItem}>
                 <View style={[styles.ruleDot, { backgroundColor: COLORS.danger }]} />
                 <Text style={styles.ruleText}>
-                  联系间隔>11天（10天+1天宽容）：每多一天扣3分
+                  联系间隔{'>'} 10天：每多一天扣3分
                 </Text>
               </View>
                 </View>
@@ -229,11 +210,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
           departmentRanking: data.departmentRanking || [],
           responseMetrics: data.responseMetrics,
           healthScore: data.healthScore || 0,
-          trends: data.trends || {
-            avgContactInterval: { current: 0, previous: 0, change: 0, trend: 'stable' },
-            urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
-            unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
-          },
         });
       } else {
         console.error('获取统计数据失败:', statsResult.message);
@@ -250,11 +226,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
           },
           departmentRanking: [],
           healthScore: 0,
-          trends: {
-            avgContactInterval: { current: 0, previous: 0, change: 0, trend: 'stable' },
-            urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
-            unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
-          },
         });
       }
     } catch (error) {
@@ -272,11 +243,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
         },
         departmentRanking: [],
         healthScore: 0,
-        trends: {
-          avgContactInterval: { current: 0, previous: 0, change: 0, trend: 'stable' },
-          urgentCount: { current: 0, previous: 0, change: 0, trend: 'stable' },
-          unhandledReminders: { current: 0, previous: 0, change: 0, trend: 'stable' },
-        },
       });
     } finally {
       setLoading(false);
@@ -404,33 +370,6 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
     );
   };
 
-  // 渲染趋势指示器
-  const renderTrendIndicator = (trend: TrendData, isPositiveGood: boolean = true, isDecimal: boolean = false) => {
-    if (trend.change === 0) {
-      return <Text style={styles.trendText}>-</Text>;
-    }
-
-    const isGood = isPositiveGood
-      ? trend.trend === 'up'
-      : trend.trend === 'down';
-    const color = isGood ? COLORS.success : COLORS.danger;
-    const icon = trend.trend === 'up' ? 'arrow-up' : 'arrow-down';
-
-    // 根据是否是小数类型决定显示格式
-    const changeValue = isDecimal 
-      ? trend.change.toFixed(1)
-      : Math.abs(trend.change).toString();
-
-    return (
-      <View style={styles.trendContainer}>
-        <Icon name={icon} size={12} color={color} />
-        <Text style={[styles.trendText, { color }]}>
-          {changeValue}{isDecimal ? '天' : isPositiveGood ? '%' : '人'}
-        </Text>
-      </View>
-    );
-  };
-
   // 判断是否需要显示预警
   const getAlerts = () => {
     const alerts = [];
@@ -452,7 +391,7 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
       });
     }
 
-    if ((statistics.responseMetrics?.avgContactInterval || 0) > 11) {
+    if ((statistics.responseMetrics?.avgContactInterval || 0) > 10) {
       alerts.push({
         type: 'info',
         icon: 'lightbulb-o',
@@ -546,18 +485,15 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.healthMetrics}>
               <View style={styles.healthMetricItem}>
                 <Text style={styles.healthMetricLabel}>平均联系间隔</Text>
-                <View style={styles.healthMetricRow}>
-                  <Text style={[styles.healthMetricValue, {
-                    color: (statistics.responseMetrics?.avgContactInterval || 0) <= 8 
-                      ? COLORS.success 
-                      : (statistics.responseMetrics?.avgContactInterval || 0) <= 11
-                      ? COLORS.warning
-                      : COLORS.danger
-                  }]}>
-                    {(statistics.responseMetrics?.avgContactInterval || 0).toFixed(1)}天
-                  </Text>
-                  {statistics.trends && renderTrendIndicator(statistics.trends.avgContactInterval, false, true)}
-                </View>
+                <Text style={[styles.healthMetricValue, {
+                  color: (statistics.responseMetrics?.avgContactInterval || 0) <= 7 
+                    ? COLORS.success 
+                    : (statistics.responseMetrics?.avgContactInterval || 0) <= 10
+                    ? COLORS.warning
+                    : COLORS.danger
+                }]}>
+                  {(statistics.responseMetrics?.avgContactInterval || 0).toFixed(1)}天
+                </Text>
               </View>
               <View style={styles.healthMetricItem}>
                 <Text style={styles.healthMetricLabel}>有提醒人数</Text>
@@ -569,12 +505,9 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
               </View>
               <View style={styles.healthMetricItem}>
                 <Text style={styles.healthMetricLabel}>未处理提醒</Text>
-                <View style={styles.healthMetricRow}>
-                  <Text style={styles.healthMetricValue}>
-                    {statistics.responseMetrics?.unhandledReminders || 0}
-                  </Text>
-                  {statistics.trends && renderTrendIndicator(statistics.trends.unhandledReminders, false)}
-                </View>
+                <Text style={styles.healthMetricValue}>
+                  {statistics.responseMetrics?.unhandledReminders || 0}
+                </Text>
               </View>
             </View>
           </View>
@@ -627,30 +560,27 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                    styles.overviewChange,
                    {
                      color:
-                       (statistics.responseMetrics?.avgContactInterval ?? 0) <= 8
+                       (statistics.responseMetrics?.avgContactInterval ?? 0) <= 7
                          ? COLORS.success
-                         : (statistics.responseMetrics?.avgContactInterval ?? 0) <= 11
+                         : (statistics.responseMetrics?.avgContactInterval ?? 0) <= 10
                          ? COLORS.warning
                          : COLORS.danger,
                    },
                  ]}
                >
-                 {(statistics.responseMetrics?.avgContactInterval ?? 0) <= 8
+                 {(statistics.responseMetrics?.avgContactInterval ?? 0) <= 7
                    ? '优秀'
-                   : (statistics.responseMetrics?.avgContactInterval ?? 0) <= 11
+                   : (statistics.responseMetrics?.avgContactInterval ?? 0) <= 10
                    ? '良好'
                    : '需改进'}
                </Text>
              </View>
-             <View style={styles.overviewValueWithTrend}>
-               <Text style={styles.overviewValue}>
-                 {(statistics.responseMetrics?.avgContactInterval || 0).toFixed(1)}天
-               </Text>
-               {statistics.trends && renderTrendIndicator(statistics.trends.avgContactInterval, false, true)}
-             </View>
+             <Text style={styles.overviewValue}>
+               {(statistics.responseMetrics?.avgContactInterval || 0).toFixed(1)}天
+             </Text>
              <Text style={styles.overviewLabel}>平均联系间隔</Text>
              <Text style={styles.overviewHint}>
-               有活跃休假且有提醒人员的平均联系间隔
+               当前在假人员的平均联系间隔
              </Text>
            </View>
         </View>
@@ -780,9 +710,9 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
               </View>
               <View style={styles.metricItem}>
                 <Text style={[styles.metricValue, { 
-                  color: (statistics.responseMetrics?.avgContactInterval || 0) <= 8 
+                  color: (statistics.responseMetrics?.avgContactInterval || 0) <= 7 
                     ? COLORS.success 
-                    : (statistics.responseMetrics?.avgContactInterval || 0) <= 11
+                    : (statistics.responseMetrics?.avgContactInterval || 0) <= 10
                     ? COLORS.warning
                     : COLORS.danger
                 }]}>
@@ -843,9 +773,9 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                         <Text style={[
                           styles.departmentRankStatValue,
                           {
-                            color: avgContactInterval <= 8 
+                            color: avgContactInterval <= 7 
                               ? COLORS.success 
-                              : avgContactInterval <= 11
+                              : avgContactInterval <= 10
                               ? COLORS.warning
                               : COLORS.danger
                           }
@@ -966,11 +896,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#111827',
-  },
-  overviewValueWithTrend: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginBottom: 4,
   },
   overviewLabel: {
     fontSize: 12,
@@ -1283,16 +1209,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#111827',
-  },
-  // 趋势指示器样式
-  trendContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  trendText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
   // 部门排名样式
   departmentRankingList: {

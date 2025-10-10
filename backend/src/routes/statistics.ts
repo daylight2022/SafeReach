@@ -206,9 +206,9 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
 
     // 计算健康度评分 - 基于有活跃休假且有提醒的人员的联系间隔
     // 扣分规则（含1天宽容度）：
-    // - ≤ 8天（7天建议阈值 + 1天宽容）：不扣分
-    // - 9-11天（超过建议但未达紧急）：每天扣1分
-    // - > 11天（超过10天紧急阈值 + 1天宽容）：每天扣3分
+    // - ≤ 7天（7天建议阈值）：不扣分
+    // - 9-10天（超过建议但未达紧急）：每天扣1分
+    // - > 10天（超过10天紧急阈值）：每天扣3分
     let healthScore = 100;
     for (const person of activeLeavePersonsWithReminders) {
       let interval = 0;
@@ -228,42 +228,20 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       }
       
       // 应用1天宽容度的扣分规则
-      if (interval > 11) {
-        // 超过紧急阈值（10天）+ 1天宽容 = 11天，每天扣3分
-        healthScore -= (interval - 11) * 3;
+      if (interval > 10) {
+        // 超过紧急阈值（10天），每天扣3分
+        healthScore -= (interval - 10) * 3;
         // 加上9-11天的扣分（3天 × 1分）
         healthScore -= 3;
-      } else if (interval > 8) {
-        // 超过建议阈值（7天）+ 1天宽容 = 8天，每天扣1分
-        healthScore -= (interval - 8) * 1;
+      } else if (interval > 7) {
+        // 超过建议阈值（7天），每天扣1分
+        healthScore -= (interval - 7) * 1;
       }
-      // interval ≤ 8：不扣分
+      // interval ≤ 7：不扣分
     }
     
     healthScore = Math.max(0, Math.round(healthScore));
     console.log('🏥 健康度评分:', healthScore);
-
-    // 获取上期数据用于趋势对比
-    const previousPeriod = getPreviousPeriod(timeRangeStart, timeRangeEnd);
-    console.log('📅 上期时间范围:', previousPeriod);
-    
-    const previousMetrics = await calculatePreviousMetrics(
-      previousPeriod.start,
-      previousPeriod.end,
-      departmentFilter,
-    );
-    console.log('📊 上期指标:', previousMetrics);
-
-    // 计算趋势
-    const trends = {
-      avgContactInterval: calculateTrend(avgContactInterval, previousMetrics.avgContactInterval),
-      urgentCount: calculateTrend(urgentCount, previousMetrics.urgentCount),
-      unhandledReminders: calculateTrend(
-        unhandledReminders,
-        previousMetrics.unhandledReminders,
-      ),
-    };
-    console.log('📈 趋势数据:', trends);
 
     // 获取部门排名（管理员可见多部门）
     let departmentRanking = [];
@@ -304,7 +282,6 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
         totalPersonsWithReminders: activeLeavePersonsWithReminders.length,
         avgContactInterval: avgContactInterval,
       },
-      trends,
     };
     
     console.log('✅ 最终返回数据:', JSON.stringify(responseData, null, 2));
@@ -775,115 +752,6 @@ async function calculateAvgContactInterval(
   // 返回平均值，保留1位小数
   const avgInterval = intervalCount > 0 ? totalIntervals / intervalCount : 0;
   return Math.round(avgInterval * 10) / 10;
-}
-
-/**
- * 获取上期时间范围
- */
-function getPreviousPeriod(
-  start: Date,
-  end: Date,
-): { start: Date; end: Date } {
-  const duration = end.getTime() - start.getTime();
-  const previousEnd = new Date(start.getTime() - 1);
-  const previousStart = new Date(previousEnd.getTime() - duration);
-  
-  return { start: previousStart, end: previousEnd };
-}
-
-/**
- * 计算上期指标
- */
-async function calculatePreviousMetrics(
-  _startDate: Date,
-  endDate: Date,
-  departmentFilter: any,
-): Promise<{ 
-  avgContactInterval: number;
-  urgentCount: number; 
-  unhandledReminders: number;
-}> {
-  try {
-    // 获取上期有活跃休假且有未处理提醒的人员
-    const endDateStr = endDate.toISOString().split('T')[0];
-    const previousActiveLeavePersonsWithReminders = await db
-      .select({
-        personId: persons.id,
-        leaveStartDate: leaves.startDate,
-        lastContactDate: persons.lastContactDate,
-        reminderId: reminders.id,
-      })
-      .from(persons)
-      .innerJoin(leaves, eq(persons.id, leaves.personId))
-      .innerJoin(reminders, and(
-        eq(reminders.personId, persons.id),
-        eq(reminders.isHandled, false)
-      ))
-      .where(
-        and(
-          eq(leaves.status, 'active'),
-          gte(leaves.endDate, endDateStr),
-          departmentFilter,
-        ),
-      );
-
-    const unhandledReminders = previousActiveLeavePersonsWithReminders.length;
-
-    // 计算上期平均联系间隔（使用综合统计方案）
-    const avgContactInterval = await calculateAvgContactInterval(
-      previousActiveLeavePersonsWithReminders,
-      endDateStr,
-    );
-
-    // 获取上期紧急提醒数（高优先级且未处理的提醒）
-    const [{ urgentCount: previousUrgentCount }] = await db
-      .select({ urgentCount: count() })
-      .from(reminders)
-      .leftJoin(persons, eq(reminders.personId, persons.id))
-      .where(
-        and(
-          eq(reminders.priority, 'high'),
-          eq(reminders.isHandled, false),
-          departmentFilter,
-        ),
-      );
-
-    return { 
-      avgContactInterval,
-      urgentCount: previousUrgentCount || 0, 
-      unhandledReminders 
-    };
-  } catch (error) {
-    console.error('计算上期指标失败:', error);
-    return { 
-      avgContactInterval: 0,
-      urgentCount: 0, 
-      unhandledReminders: 0 
-    };
-  }
-}
-
-/**
- * 计算趋势
- * 对于联系间隔等带小数的指标，变化值也保留1位小数
- */
-function calculateTrend(
-  current: number,
-  previous: number,
-): { current: number; previous: number; change: number; trend: 'up' | 'down' | 'stable' } {
-  const change = current - previous;
-  let trend: 'up' | 'down' | 'stable' = 'stable';
-  
-  if (Math.abs(change) > 0.05) {  // 变化大于0.05才算有变化（避免浮点误差）
-    trend = change > 0 ? 'up' : 'down';
-  }
-
-  return {
-    current,
-    previous,
-    change: Math.round(Math.abs(change) * 10) / 10,  // 保留1位小数
-    trend,
-  };
 }
 
 /**
