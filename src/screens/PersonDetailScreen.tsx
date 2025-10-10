@@ -347,7 +347,7 @@ const PersonDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>在外地点</Text>
-                <Text style={styles.infoValue}>
+                <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">
                   {currentLeave.location || '未填写'}
                 </Text>
               </View>
@@ -598,15 +598,21 @@ const styles = StyleSheet.create({
   infoItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
   infoLabel: {
     fontSize: 14,
     color: COLORS.darkGray,
+    flex: 0,
+    minWidth: 70,
   },
   infoValue: {
     fontSize: 14,
     color: '#111827',
     fontWeight: '500',
+    flex: 1,
+    textAlign: 'right',
+    flexShrink: 1,
   },
   contactItem: {
     flexDirection: 'row',

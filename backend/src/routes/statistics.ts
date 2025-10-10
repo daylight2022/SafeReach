@@ -1,16 +1,11 @@
 import { Hono } from 'hono';
 import { eq, and, count, gte, lte, sql } from 'drizzle-orm';
 import { db } from '../db/connection.js';
-import { persons, contacts, leaves, reminders, users, departments, reminderSettings } from '../db/schema.js';
+import { persons, contacts, leaves, reminders, users, departments } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { validateQuery } from '../middleware/validation.js';
 import { StatisticsQuerySchema } from '../types/index.js';
 import { successResponse, serverErrorResponse } from '../utils/response.js';
-import {
-  ResponseCalculator,
-  type ReminderData,
-  type ContactData,
-} from '../utils/responseCalculator.js';
 
 const statisticsRouter = new Hono();
 
@@ -53,7 +48,7 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       timeRangeEnd = new Date();
     }
 
-    // 获取时间范围内的联系次数
+    // 获取时间范围内的联系次数（不限制是否休假结束）
     const [{ contactCount }] = await db
       .select({ contactCount: count() })
       .from(contacts)
@@ -66,17 +61,9 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
         ),
       );
 
-    // 获取时间范围内的提醒数据
-    const reminderData = await db
-      .select({
-        id: reminders.id,
-        priority: reminders.priority,
-        reminderType: reminders.reminderType,
-        reminderDate: reminders.reminderDate,
-        isHandled: reminders.isHandled,
-        handledAt: reminders.handledAt,
-        createdAt: reminders.createdAt,
-      })
+    // 获取本月提醒总数（基于 reminder_date，不限制是否休假结束）
+    const [{ totalRemindersCount }] = await db
+      .select({ totalRemindersCount: count() })
       .from(reminders)
       .leftJoin(persons, eq(reminders.personId, persons.id))
       .where(
@@ -90,57 +77,32 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
         ),
       );
 
-    // 获取时间范围内的联系数据
-    const contactData = await db
+    // 获取有活跃休假且有未处理提醒的人员（用于健康度计算和未处理提醒统计）
+    const currentDate = new Date().toISOString().split('T')[0];
+    const activeLeavePersonsWithReminders = await db
       .select({
-        id: contacts.id,
-        contactDate: contacts.contactDate,
-        personId: contacts.personId,
+        personId: persons.id,
+        personName: persons.name,
+        leaveStartDate: leaves.startDate,
+        lastContactDate: persons.lastContactDate,
+        reminderId: reminders.id,
+        reminderPriority: reminders.priority,
       })
-      .from(contacts)
-      .leftJoin(persons, eq(contacts.personId, persons.id))
+      .from(persons)
+      .innerJoin(leaves, eq(persons.id, leaves.personId))
+      .innerJoin(reminders, and(
+        eq(reminders.personId, persons.id),
+        eq(reminders.isHandled, false)
+      ))
       .where(
         and(
-          gte(contacts.contactDate, timeRangeStart),
-          lte(contacts.contactDate, timeRangeEnd),
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, currentDate),
           departmentFilter,
         ),
       );
 
-    // 转换数据格式
-    const reminderList: ReminderData[] = reminderData.map(r => ({
-      id: r.id,
-      priority: r.priority as 'high' | 'medium' | 'low',
-      reminderType: r.reminderType as
-        | 'before'
-        | 'during'
-        | 'ending'
-        | 'overdue'
-        | 'system',
-      reminderDate: r.reminderDate,
-      isHandled: r.isHandled || false,
-      handledAt: r.handledAt?.toISOString(),
-      createdAt: r.createdAt?.toISOString() || new Date().toISOString(),
-    }));
-
-    const contactList: ContactData[] = contactData.map(c => ({
-      id: c.id,
-      contactDate: c.contactDate.toISOString(),
-      personId: c.personId,
-      hasRelatedReminder: reminderData.some(
-        r => r.reminderDate === c.contactDate.toISOString().split('T')[0],
-      ),
-    }));
-
-    // 计算响应指标
-    const metrics = ResponseCalculator.calculateResponseMetrics(
-      reminderList,
-      contactList,
-      personCount,
-    );
-
-    // 计算在假人员数量
-    const currentDate = new Date().toISOString().split('T')[0];
+    // 计算在假人员数量：统计所有有活跃休假的人员（不管是否有提醒）
     const [{ activePersons: activePersonsCount }] = await db
       .select({ activePersons: count() })
       .from(leaves)
@@ -155,7 +117,7 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
     const activePersons = activePersonsCount || 0;
 
     // 基于 reminder 表统计人员状态分布
-    // 统计未处理的提醒记录按优先级分布
+    // 统计未处理的、已到期的提醒记录按优先级分布（只统计当前需要处理的）
     const reminderDistribution = await db
       .select({
         priority: reminders.priority,
@@ -166,11 +128,7 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       .where(
         and(
           eq(reminders.isHandled, false),
-          gte(
-            reminders.reminderDate,
-            timeRangeStart.toISOString().split('T')[0],
-          ),
-          lte(reminders.reminderDate, timeRangeEnd.toISOString().split('T')[0]),
+          lte(reminders.reminderDate, currentDate), // 只统计已到期的提醒
           departmentFilter,
         ),
       )
@@ -237,61 +195,53 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       weeklyData.push(dailyCount);
     }
 
-    // 从提醒设置中获取阈值
-    const [userSettings] = await db
-      .select()
-      .from(reminderSettings)
-      .where(eq(reminderSettings.userId, currentUser.userId));
-    
-    const suggestThreshold = userSettings?.suggestThreshold || 7; // 建议联系阈值，默认7天
-    const urgentThreshold = userSettings?.urgentThreshold || 10; // 紧急联系阈值，默认10天
-    
-    // 计算响应指标：只有当天处理才算及时
-    let timelyResponse = 0;        // 及时响应数（当天处理）
-    let overdueProcessed = 0;      // 超期处理数（超过紧急阈值）
-    
-    for (const reminder of reminderList) {
-      if (reminder.isHandled && reminder.handledAt) {
-        // 已处理：看 handled_at 是否超过 created_at 一天及以上
-        const createdDate = new Date(reminder.createdAt);
-        const handledDate = new Date(reminder.handledAt);
-        
-        // 只比较日期部分
-        createdDate.setHours(0, 0, 0, 0);
-        handledDate.setHours(0, 0, 0, 0);
-        
-        const responseDays = Math.floor(
-          (handledDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24),
-        );
-        
-        // 当天处理（responseDays = 0）才算及时
-        if (responseDays === 0) {
-          timelyResponse++;
-        }
-        
-        // 超过紧急阈值才处理
-        if (responseDays > urgentThreshold) {
-          overdueProcessed++;
-        }
+    // 计算未处理提醒数（有活跃休假且有未处理提醒的人数）
+    const unhandledReminders = activeLeavePersonsWithReminders.length;
+
+    // 计算平均联系间隔天数（新方案：统计所有联系间隔的综合平均值）
+    const avgContactInterval = await calculateAvgContactInterval(
+      activeLeavePersonsWithReminders,
+      currentDate,
+    );
+
+    // 计算健康度评分 - 基于有活跃休假且有提醒的人员的联系间隔
+    // 扣分规则（含1天宽容度）：
+    // - ≤ 8天（7天建议阈值 + 1天宽容）：不扣分
+    // - 9-11天（超过建议但未达紧急）：每天扣1分
+    // - > 11天（超过10天紧急阈值 + 1天宽容）：每天扣3分
+    let healthScore = 100;
+    for (const person of activeLeavePersonsWithReminders) {
+      let interval = 0;
+      
+      if (person.lastContactDate) {
+        const lastContact = new Date(person.lastContactDate);
+        const today = new Date();
+        lastContact.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        interval = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
+      } else {
+        const leaveStart = new Date(person.leaveStartDate);
+        const today = new Date();
+        leaveStart.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        interval = Math.floor((today.getTime() - leaveStart.getTime()) / (1000 * 60 * 60 * 24));
       }
-      // 未处理的情况：reminder_date 超过 created_at 一天及以上，说明已经拖延了
-      // 这种情况不算及时（timelyResponse 不增加）
+      
+      // 应用1天宽容度的扣分规则
+      if (interval > 11) {
+        // 超过紧急阈值（10天）+ 1天宽容 = 11天，每天扣3分
+        healthScore -= (interval - 11) * 3;
+        // 加上9-11天的扣分（3天 × 1分）
+        healthScore -= 3;
+      } else if (interval > 8) {
+        // 超过建议阈值（7天）+ 1天宽容 = 8天，每天扣1分
+        healthScore -= (interval - 8) * 1;
+      }
+      // interval ≤ 8：不扣分
     }
     
-    // 计算响应率
-    const totalReminders = reminderList.length;
-    
-    // 及时响应率 = (当天处理的数量 / 总提醒数) * 100
-    const timelyResponseRate =
-      totalReminders > 0
-        ? Math.round((timelyResponse / totalReminders) * 100)
-        : 0;
-
-    // 计算健康度评分 - 使用扣分制
-    const healthScoreResult = await calculateHealthScoreByDeduction(reminderList);
-    const healthScore = healthScoreResult.score;
+    healthScore = Math.max(0, Math.round(healthScore));
     console.log('🏥 健康度评分:', healthScore);
-    console.log('🏥 健康度详情:', healthScoreResult.details);
 
     // 获取上期数据用于趋势对比
     const previousPeriod = getPreviousPeriod(timeRangeStart, timeRangeEnd);
@@ -306,11 +256,10 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
 
     // 计算趋势
     const trends = {
-      timelyResponseRate: calculateTrend(timelyResponseRate, previousMetrics.timelyResponseRate),
-      overdueProcessed: calculateTrend(overdueProcessed, previousMetrics.overdueProcessed),
+      avgContactInterval: calculateTrend(avgContactInterval, previousMetrics.avgContactInterval),
       urgentCount: calculateTrend(urgentCount, previousMetrics.urgentCount),
       unhandledReminders: calculateTrend(
-        metrics.unhandledReminders,
+        unhandledReminders,
         previousMetrics.unhandledReminders,
       ),
     };
@@ -328,11 +277,11 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
         {
           departmentId: currentUser.departmentId || '',
           name: '当前部门',
-          timelyResponseRate,
-          overdueProcessed,
+          avgContactInterval,
           urgentCount,
-          totalReminders: metrics.totalReminders,
-          unhandledReminders: metrics.unhandledReminders,
+          totalReminders: totalRemindersCount,
+          unhandledReminders: unhandledReminders,
+          healthScore,
         },
       ];
     }
@@ -346,14 +295,15 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       statusDistribution,
       departmentRanking,
       responseMetrics: {
-        ...metrics,
-        timelyResponseRate,   // 及时响应率
-        overdueProcessed,     // 超期处理数
-        suggestThreshold,     // 建议阈值天数
-        urgentThreshold,      // 紧急阈值天数
+        totalReminders: totalRemindersCount,  // 本月提醒总数
+        unhandledReminders: unhandledReminders,  // 未处理提醒数（有活跃休假且有提醒）
+        avgContactInterval: avgContactInterval,  // 平均联系间隔天数
       },
       healthScore,
-      healthScoreDetails: healthScoreResult.details,
+      healthScoreDetails: {
+        totalPersonsWithReminders: activeLeavePersonsWithReminders.length,
+        avgContactInterval: avgContactInterval,
+      },
       trends,
     };
     
@@ -396,7 +346,7 @@ statisticsRouter.get('/dashboard', async c => {
       .leftJoin(persons, eq(contacts.personId, persons.id))
       .where(and(gte(contacts.contactDate, startOfMonth), departmentFilter));
 
-    // 获取进行中的休假数量（排除已结束的休假）
+    // 获取在假人员数量：统计所有有活跃休假的人员（不管是否有提醒）
     const currentDate = new Date().toISOString().split('T')[0];
     const [{ activeLeaveCount }] = await db
       .select({ activeLeaveCount: count() })
@@ -720,116 +670,111 @@ statisticsRouter.get('/personal', async c => {
 });
 
 /**
- * 计算健康度评分 - 基于扣分制
- * 初始100分，根据提醒记录的响应速度扣分
- * 
- * 核心理解：reminder记录的创建本身就代表已经到了需要联系的时候
- * 
- * 扣分规则：
- * - 已处理：handled_at - created_at，超过0天（即拖延处理），每天扣3分
- * - 未处理：当前日期 - created_at，超过0天（即一直不处理），每天扣1分
- * 
- * 只比较日期部分，当天处理（0天）不扣分
- * 提醒记录是凌晨更新，当日没联系，从第二天开始就要扣分
+ * 计算平均联系间隔（综合统计方案）
+ * 统计有活跃休假人员的所有联系间隔：
+ * - 第一次联系间隔：休假开始日期到第一次联系
+ * - 中间联系间隔：每两次联系之间的差值
+ * - 最后一次联系间隔：最后一次联系到当前日期（仅当休假未结束）
+ * 返回所有间隔的平均值（保留1位小数）
  */
-async function calculateHealthScoreByDeduction(
-  reminderList: Array<{
-    id: string;
-    priority: 'high' | 'medium' | 'low';
-    reminderDate: string;
-    isHandled: boolean;
-    handledAt?: string | null;
-    createdAt: string;
+async function calculateAvgContactInterval(
+  personsWithReminders: Array<{
+    personId: string;
+    leaveStartDate: string;
   }>,
-): Promise<{
-  score: number;
-  details: {
-    totalReminders: number;
-    handledReminders: number;
-    unhandledReminders: number;
-    totalDeduction: number;
-    avgResponseDays: number;
-  };
-}> {
-  let totalDeduction = 0;
-  let totalResponseDays = 0;
-  let handledCount = 0;
+  currentDate: string,
+): Promise<number> {
+  if (personsWithReminders.length === 0) return 0;
 
-  for (const reminder of reminderList) {
-    let responseDays = 0;
+  let totalIntervals = 0;
+  let intervalCount = 0;
 
-    if (reminder.isHandled && reminder.handledAt) {
-      // 已处理：计算 handled_at - created_at 的天数
-      const createdDate = new Date(reminder.createdAt);
-      const handledDate = new Date(reminder.handledAt);
-      
-      // 只比较日期部分，忽略时间
-      createdDate.setHours(0, 0, 0, 0);
-      handledDate.setHours(0, 0, 0, 0);
-      
-      responseDays = Math.floor(
-        (handledDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      handledCount++;
-      totalResponseDays += responseDays;
-      
-      console.log(`🔍 已处理提醒: id=${reminder.id}, created=${new Date(reminder.createdAt).toISOString().split('T')[0]}, handled=${new Date(reminder.handledAt).toISOString().split('T')[0]}, days=${responseDays}`);
-      
-      // 已处理：超过0天（拖延处理），每天扣3分
-      if (responseDays > 0) {
-        totalDeduction += responseDays * 3;
-        console.log(`  → 扣分: ${responseDays}天 × 3 = ${responseDays * 3}分`);
-      }
+  for (const person of personsWithReminders) {
+    // 获取该人员当前活跃休假的信息
+    const [activeLeave] = await db
+      .select({
+        id: leaves.id,
+        startDate: leaves.startDate,
+        endDate: leaves.endDate,
+        status: leaves.status,
+      })
+      .from(leaves)
+      .where(
+        and(
+          eq(leaves.personId, person.personId),
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, currentDate),
+        ),
+      )
+      .orderBy(leaves.startDate)
+      .limit(1);
+
+    if (!activeLeave) continue;
+
+    const leaveStartDate = new Date(activeLeave.startDate);
+    const leaveEndDate = new Date(activeLeave.endDate);
+    const today = new Date(currentDate);
+    
+    leaveStartDate.setHours(0, 0, 0, 0);
+    leaveEndDate.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+
+    // 获取该人员在当前休假期间的所有联系记录（按日期升序）
+    const contactRecords = await db
+      .select({
+        contactDate: contacts.contactDate,
+      })
+      .from(contacts)
+      .where(
+        and(
+          eq(contacts.personId, person.personId),
+          gte(contacts.contactDate, leaveStartDate),
+        ),
+      )
+      .orderBy(contacts.contactDate);
+
+    if (contactRecords.length === 0) {
+      // 没有联系记录：间隔 = 休假开始到今天
+      const interval = (today.getTime() - leaveStartDate.getTime()) / (1000 * 60 * 60 * 24);
+      totalIntervals += interval;
+      intervalCount++;
     } else {
-      // 未处理：计算当前日期 - created_at 的天数（提醒存在了多久）
-      const createdDate = new Date(reminder.createdAt);
-      const currentDate = new Date();
-      
-      // 只比较日期部分，忽略时间
-      createdDate.setHours(0, 0, 0, 0);
-      currentDate.setHours(0, 0, 0, 0);
-      
-      responseDays = Math.floor(
-        (currentDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
-      
-      console.log(`🔍 未处理提醒: id=${reminder.id}, created=${new Date(reminder.createdAt).toISOString().split('T')[0]}, today=${currentDate.toISOString().split('T')[0]}, days=${responseDays}`);
-      
-      // 如果计算结果为负数（异常情况），跳过
-      if (responseDays < 0) {
-        console.warn(`⚠️ 异常提醒记录: today < created_at, id=${reminder.id}`);
-        continue;
+      // 第一次联系间隔：休假开始到第一次联系
+      const firstContactDate = new Date(contactRecords[0].contactDate);
+      firstContactDate.setHours(0, 0, 0, 0);
+      const firstInterval = (firstContactDate.getTime() - leaveStartDate.getTime()) / (1000 * 60 * 60 * 24);
+      totalIntervals += firstInterval;
+      intervalCount++;
+
+      // 中间联系间隔：每两次联系之间
+      for (let i = 1; i < contactRecords.length; i++) {
+        const prevContactDate = new Date(contactRecords[i - 1].contactDate);
+        const currContactDate = new Date(contactRecords[i].contactDate);
+        prevContactDate.setHours(0, 0, 0, 0);
+        currContactDate.setHours(0, 0, 0, 0);
+        const interval = (currContactDate.getTime() - prevContactDate.getTime()) / (1000 * 60 * 60 * 24);
+        totalIntervals += interval;
+        intervalCount++;
       }
+
+      // 最后一次联系间隔：最后一次联系到今天（仅当休假未结束）
+      const lastContactDate = new Date(contactRecords[contactRecords.length - 1].contactDate);
+      lastContactDate.setHours(0, 0, 0, 0);
       
-      // 未处理：超过0天（一直不处理），每天扣1分
-      if (responseDays > 0) {
-        totalDeduction += responseDays * 1;
-        console.log(`  → 扣分: ${responseDays}天 × 1 = ${responseDays * 1}分`);
+      // 判断休假是否已结束
+      const isLeaveEnded = today.getTime() > leaveEndDate.getTime();
+      
+      if (!isLeaveEnded) {
+        const lastInterval = (today.getTime() - lastContactDate.getTime()) / (1000 * 60 * 60 * 24);
+        totalIntervals += lastInterval;
+        intervalCount++;
       }
     }
   }
 
-  // 计算最终分数，确保不低于0分
-  const finalScore = Math.max(0, 100 - totalDeduction);
-  const avgResponseDays = handledCount > 0 ? Math.round(totalResponseDays / handledCount) : 0;
-
-  console.log(`📊 健康度计算汇总:`);
-  console.log(`   - 总提醒数: ${reminderList.length}`);
-  console.log(`   - 已处理: ${handledCount}, 未处理: ${reminderList.length - handledCount}`);
-  console.log(`   - 平均响应天数: ${avgResponseDays}天`);
-  console.log(`   - 总扣分: ${totalDeduction}分`);
-  console.log(`   - 最终得分: ${finalScore}分`);
-
-  return {
-    score: Math.round(finalScore),
-    details: {
-      totalReminders: reminderList.length,
-      handledReminders: handledCount,
-      unhandledReminders: reminderList.length - handledCount,
-      totalDeduction,
-      avgResponseDays,
-    },
-  };
+  // 返回平均值，保留1位小数
+  const avgInterval = intervalCount > 0 ? totalIntervals / intervalCount : 0;
+  return Math.round(avgInterval * 10) / 10;
 }
 
 /**
@@ -850,71 +795,47 @@ function getPreviousPeriod(
  * 计算上期指标
  */
 async function calculatePreviousMetrics(
-  startDate: Date,
+  _startDate: Date,
   endDate: Date,
   departmentFilter: any,
 ): Promise<{ 
-  timelyResponseRate: number;
-  overdueProcessed: number;
+  avgContactInterval: number;
   urgentCount: number; 
   unhandledReminders: number;
 }> {
   try {
-    // 获取上期提醒数据
-    const previousReminders = await db
+    // 获取上期有活跃休假且有未处理提醒的人员
+    const endDateStr = endDate.toISOString().split('T')[0];
+    const previousActiveLeavePersonsWithReminders = await db
       .select({
-        isHandled: reminders.isHandled,
-        handledAt: reminders.handledAt,
-        reminderDate: reminders.reminderDate,
-        createdAt: reminders.createdAt,
+        personId: persons.id,
+        leaveStartDate: leaves.startDate,
+        lastContactDate: persons.lastContactDate,
+        reminderId: reminders.id,
       })
-      .from(reminders)
-      .leftJoin(persons, eq(reminders.personId, persons.id))
+      .from(persons)
+      .innerJoin(leaves, eq(persons.id, leaves.personId))
+      .innerJoin(reminders, and(
+        eq(reminders.personId, persons.id),
+        eq(reminders.isHandled, false)
+      ))
       .where(
         and(
-          gte(reminders.reminderDate, startDate.toISOString().split('T')[0]),
-          lte(reminders.reminderDate, endDate.toISOString().split('T')[0]),
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, endDateStr),
           departmentFilter,
         ),
       );
 
-    // 计算响应指标：只有当天处理才算及时
-    let timelyResponse = 0;
-    let overdueProcessed = 0;
-    let unhandledReminders = 0;
-    const urgentThreshold = 10;
+    const unhandledReminders = previousActiveLeavePersonsWithReminders.length;
 
-    for (const reminder of previousReminders) {
-      if (!reminder.isHandled) {
-        unhandledReminders++;
-      } else if (reminder.handledAt && reminder.createdAt) {
-        const createdDate = new Date(reminder.createdAt);
-        const handledDate = new Date(reminder.handledAt);
-        
-        createdDate.setHours(0, 0, 0, 0);
-        handledDate.setHours(0, 0, 0, 0);
-        
-        const responseDays = Math.floor(
-          (handledDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24),
-        );
-        
-        // 当天处理才算及时
-        if (responseDays === 0) {
-          timelyResponse++;
-        }
-        if (responseDays > urgentThreshold) {
-          overdueProcessed++;
-        }
-      }
-    }
+    // 计算上期平均联系间隔（使用综合统计方案）
+    const avgContactInterval = await calculateAvgContactInterval(
+      previousActiveLeavePersonsWithReminders,
+      endDateStr,
+    );
 
-    const totalReminders = previousReminders.length;
-      
-    const timelyResponseRate = totalReminders > 0
-      ? Math.round((timelyResponse / totalReminders) * 100)
-      : 0;
-
-    // 获取上期紧急提醒数（基于 reminder 表）
+    // 获取上期紧急提醒数（高优先级且未处理的提醒）
     const [{ urgentCount: previousUrgentCount }] = await db
       .select({ urgentCount: count() })
       .from(reminders)
@@ -923,23 +844,19 @@ async function calculatePreviousMetrics(
         and(
           eq(reminders.priority, 'high'),
           eq(reminders.isHandled, false),
-          gte(reminders.reminderDate, startDate.toISOString().split('T')[0]),
-          lte(reminders.reminderDate, endDate.toISOString().split('T')[0]),
           departmentFilter,
         ),
       );
 
     return { 
-      timelyResponseRate,
-      overdueProcessed,
+      avgContactInterval,
       urgentCount: previousUrgentCount || 0, 
       unhandledReminders 
     };
   } catch (error) {
     console.error('计算上期指标失败:', error);
     return { 
-      timelyResponseRate: 0,
-      overdueProcessed: 0,
+      avgContactInterval: 0,
       urgentCount: 0, 
       unhandledReminders: 0 
     };
@@ -948,6 +865,7 @@ async function calculatePreviousMetrics(
 
 /**
  * 计算趋势
+ * 对于联系间隔等带小数的指标，变化值也保留1位小数
  */
 function calculateTrend(
   current: number,
@@ -956,14 +874,14 @@ function calculateTrend(
   const change = current - previous;
   let trend: 'up' | 'down' | 'stable' = 'stable';
   
-  if (Math.abs(change) > 0) {
+  if (Math.abs(change) > 0.05) {  // 变化大于0.05才算有变化（避免浮点误差）
     trend = change > 0 ? 'up' : 'down';
   }
 
   return {
     current,
     previous,
-    change: Math.abs(change),
+    change: Math.round(Math.abs(change) * 10) / 10,  // 保留1位小数
     trend,
   };
 }
@@ -978,13 +896,11 @@ async function getDepartmentRanking(
 ): Promise<Array<{
   departmentId: string;
   name: string;
-  timelyResponseRate: number;    // 及时响应率
-  overdueProcessed: number;      // 超期处理数
+  avgContactInterval: number;    // 平均联系间隔
   urgentCount: number;
   totalReminders: number;
   unhandledReminders: number;
   healthScore: number;
-  avgResponseDays: number;
 }>> {
   try {
     // 获取所有有人员的部门
@@ -1001,23 +917,16 @@ async function getDepartmentRanking(
     console.log('📋 找到的部门列表:', deptList);
 
     const ranking = [];
-    const urgentThreshold = 10; // 紧急联系阈值
+    const currentDate = new Date().toISOString().split('T')[0];
 
     for (const dept of deptList) {
       const deptFilter = eq(persons.departmentId, dept.id);
       
       console.log(`📊 处理部门: ${dept.name} (${dept.id})`);
 
-      // 获取该部门的提醒数据（包含完整信息用于健康度计算）
-      const deptReminders = await db
-        .select({
-          id: reminders.id,
-          priority: reminders.priority,
-          reminderDate: reminders.reminderDate,
-          isHandled: reminders.isHandled,
-          handledAt: reminders.handledAt,
-          createdAt: reminders.createdAt,
-        })
+      // 获取本月该部门的提醒总数（基于 reminder_date）
+      const [{ totalRemindersCount: deptTotalReminders }] = await db
+        .select({ totalRemindersCount: count() })
         .from(reminders)
         .leftJoin(persons, eq(reminders.personId, persons.id))
         .where(
@@ -1028,45 +937,39 @@ async function getDepartmentRanking(
           ),
         );
 
-      // 计算响应指标：只有当天处理才算及时
-      let timelyResponse = 0;        // 及时响应数（当天处理）
-      let overdueProcessed = 0;      // 超期处理数
-      let unhandledReminders = 0;
+      // 获取该部门有活跃休假且有未处理提醒的人员
+      const deptActiveLeavePersonsWithReminders = await db
+        .select({
+          personId: persons.id,
+          personName: persons.name,
+          leaveStartDate: leaves.startDate,
+          lastContactDate: persons.lastContactDate,
+          reminderId: reminders.id,
+          reminderPriority: reminders.priority,
+        })
+        .from(persons)
+        .innerJoin(leaves, eq(persons.id, leaves.personId))
+        .innerJoin(reminders, and(
+          eq(reminders.personId, persons.id),
+          eq(reminders.isHandled, false)
+        ))
+        .where(
+          and(
+            eq(leaves.status, 'active'),
+            gte(leaves.endDate, currentDate),
+            deptFilter,
+          ),
+        );
 
-      for (const reminder of deptReminders) {
-        if (!reminder.isHandled) {
-          unhandledReminders++;
-        } else if (reminder.handledAt && reminder.createdAt) {
-          const createdDate = new Date(reminder.createdAt);
-          const handledDate = new Date(reminder.handledAt);
-          
-          // 只比较日期部分
-          createdDate.setHours(0, 0, 0, 0);
-          handledDate.setHours(0, 0, 0, 0);
-          
-          const responseDays = Math.floor(
-            (handledDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24),
-          );
-          
-          // 当天处理才算及时
-          if (responseDays === 0) {
-            timelyResponse++;
-          }
-          
-          // 超过紧急阈值才处理
-          if (responseDays > urgentThreshold) {
-            overdueProcessed++;
-          }
-        }
-      }
+      const unhandledReminders = deptActiveLeavePersonsWithReminders.length;
 
-      const totalReminders = deptReminders.length;
-      
-      const timelyResponseRate = totalReminders > 0
-        ? Math.round((timelyResponse / totalReminders) * 100)
-        : 0;
+      // 计算该部门的平均联系间隔（使用综合统计方案）
+      const avgContactInterval = await calculateAvgContactInterval(
+        deptActiveLeavePersonsWithReminders,
+        currentDate,
+      );
 
-      // 获取紧急提醒数（基于 reminder 表）
+      // 获取当前未处理的高优先级提醒数
       const [{ urgentCount: deptUrgentCount }] = await db
         .select({ urgentCount: count() })
         .from(reminders)
@@ -1075,36 +978,49 @@ async function getDepartmentRanking(
           and(
             eq(reminders.priority, 'high'),
             eq(reminders.isHandled, false),
-            gte(reminders.reminderDate, startDate.toISOString().split('T')[0]),
-            lte(reminders.reminderDate, endDate.toISOString().split('T')[0]),
             deptFilter,
           ),
         );
-
       const urgentCount = deptUrgentCount || 0;
 
-      // 使用扣分制计算该部门的健康度评分
-      const deptHealthResult = await calculateHealthScoreByDeduction(
-        deptReminders.map(r => ({
-          id: r.id,
-          priority: r.priority as 'high' | 'medium' | 'low',
-          reminderDate: r.reminderDate,
-          isHandled: r.isHandled || false,
-          handledAt: r.handledAt ? r.handledAt.toISOString() : null,
-          createdAt: r.createdAt ? r.createdAt.toISOString() : new Date().toISOString(),
-        })),
-      );
+      // 计算该部门的健康度评分（应用1天宽容度）
+      let healthScore = 100;
+      for (const person of deptActiveLeavePersonsWithReminders) {
+        let interval = 0;
+        
+        if (person.lastContactDate) {
+          const lastContact = new Date(person.lastContactDate);
+          const today = new Date();
+          lastContact.setHours(0, 0, 0, 0);
+          today.setHours(0, 0, 0, 0);
+          interval = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
+        } else {
+          const leaveStart = new Date(person.leaveStartDate);
+          const today = new Date();
+          leaveStart.setHours(0, 0, 0, 0);
+          today.setHours(0, 0, 0, 0);
+          interval = Math.floor((today.getTime() - leaveStart.getTime()) / (1000 * 60 * 60 * 24));
+        }
+        
+        // 应用1天宽容度的扣分规则
+        if (interval > 11) {
+          healthScore -= (interval - 11) * 3;
+          healthScore -= 3; // 9-11天的扣分
+        } else if (interval > 8) {
+          healthScore -= (interval - 8) * 1;
+        }
+      }
+      
+      healthScore = Math.max(0, Math.round(healthScore));
 
       const deptData = {
         departmentId: dept.id,
         name: dept.name,
-        timelyResponseRate,    // 及时响应率
-        overdueProcessed,      // 超期处理数
+        avgContactInterval,
         urgentCount,
-        totalReminders,
+        totalReminders: deptTotalReminders || 0,
         unhandledReminders,
-        healthScore: deptHealthResult.score,
-        avgResponseDays: deptHealthResult.details.avgResponseDays,
+        healthScore,
       };
       
       console.log(`✅ 部门数据:`, deptData);

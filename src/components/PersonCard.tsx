@@ -94,7 +94,10 @@ const PersonCard: React.FC<Props> = ({ person, onPress, onContact }) => {
 
   const getRemainingDays = () => {
     if (!currentLeave) return null;
-    return dayjs(currentLeave.endDate).diff(dayjs(), 'days');
+    // 计算剩余天数：包含今天在内，所以需要 +1
+    // 例如：今天10号，到假11号，diff=1天，但实际剩余2天（10、11）
+    const diffDays = dayjs(currentLeave.endDate).diff(dayjs().startOf('day'), 'days');
+    return diffDays + 1;
   };
 
   const hasNote = personNoteStorage.hasNote(person.id);

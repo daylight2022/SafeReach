@@ -228,15 +228,17 @@ function getYesterdayDate() {
 }
 
 /**
- * 删除昨天休假已结束的人员及其相关记录
+ * 更新昨天休假已结束的记录状态为 completed
+ * 同时将关联的未处理提醒标记为已处理
  */
-async function deleteCompletedPersons() {
+async function updateCompletedLeaves() {
   const yesterdayDate = getYesterdayDate();
   
   try {
-    // 查找昨天结束休假的人员
-    const completedPersons = await db
+    // 查找昨天结束的休假记录
+    const completedLeaves = await db
       .select({
+        leaveId: leaves.id,
         personId: leaves.personId,
         personName: persons.name,
       })
@@ -249,25 +251,77 @@ async function deleteCompletedPersons() {
         )
       );
 
-    if (completedPersons.length === 0) {
-      console.log('📋 昨天没有人员休假结束，无需删除');
-      return { deletedCount: 0 };
+    if (completedLeaves.length === 0) {
+      console.log('📋 昨天没有休假结束，无需更新');
+      return { updatedCount: 0, handledRemindersCount: 0 };
     }
 
-    const personIds = completedPersons.map(p => p.personId).filter(id => id !== null);
-    const personNames = completedPersons.map(p => p.personName).filter(name => name !== null);
+    const leaveIds = completedLeaves.map(l => l.leaveId).filter(id => id !== null);
+    const personIds = completedLeaves.map(l => l.personId).filter(id => id !== null);
+    const personNames = completedLeaves.map(l => l.personName).filter(name => name !== null);
 
-    console.log(`🗑️  准备删除 ${personIds.length} 位昨天休假结束的人员: ${personNames.join(', ')}`);
+    console.log(`📝 准备更新 ${leaveIds.length} 条昨天结束的休假记录状态: ${personNames.join(', ')}`);
 
-    // 删除人员记录（由于设置了级联删除，会自动删除关联的 leaves, contacts, reminders）
-    for (const personId of personIds) {
-      await db.delete(persons).where(eq(persons.id, personId));
+    // 更新休假记录状态为 completed
+    for (const leaveId of leaveIds) {
+      await db.update(leaves).set({ status: 'completed' }).where(eq(leaves.id, leaveId));
     }
 
-    console.log(`✅ 已删除 ${personIds.length} 位人员及其相关记录 (leaves, contacts, reminders)`);
-    return { deletedCount: personIds.length, deletedNames: personNames };
+    console.log(`✅ 已更新 ${leaveIds.length} 条休假记录状态为 completed`);
+
+    // 将这些休假关联的未处理提醒标记为已处理
+    let handledRemindersCount = 0;
+    if (leaveIds.length > 0) {
+      for (const leaveId of leaveIds) {
+        const result = await db
+          .update(reminders)
+          .set({
+            isHandled: true,
+            handledAt: new Date(),
+          })
+          .where(
+            and(
+              eq(reminders.leaveId, leaveId),
+              eq(reminders.isHandled, false)
+            )
+          );
+        
+        const count = result.rowCount || 0;
+        handledRemindersCount += count;
+      }
+      
+      console.log(`✅ 已将 ${handledRemindersCount} 条关联的提醒标记为已处理`);
+    }
+
+    // 同时处理没有 leaveId 但 personId 匹配的未处理提醒
+    // （针对一些历史数据或特殊情况）
+    if (personIds.length > 0) {
+      for (const personId of personIds) {
+        const result = await db
+          .update(reminders)
+          .set({
+            isHandled: true,
+            handledAt: new Date(),
+          })
+          .where(
+            and(
+              eq(reminders.personId, personId),
+              eq(reminders.isHandled, false),
+              sql`${reminders.leaveId} IS NULL`
+            )
+          );
+        
+        const count = result.rowCount || 0;
+        if (count > 0) {
+          handledRemindersCount += count;
+          console.log(`✅ 额外处理了人员 ${personId} 的 ${count} 条无 leaveId 的提醒`);
+        }
+      }
+    }
+
+    return { updatedCount: leaveIds.length, updatedNames: personNames, handledRemindersCount };
   } catch (error) {
-    console.error('❌ 删除休假结束人员失败:', error);
+    console.error('❌ 更新休假结束状态失败:', error);
     throw error;
   }
 }
@@ -300,128 +354,86 @@ async function updateLeaveStatus() {
 }
 
 /**
- * 处理休假相关提醒
+ * 统一的提醒处理函数
+ * 只处理当前正在休假中的人员（在外人员）
  */
-async function processLeaveReminders() {
-  const currentDate = getCurrentDate();
-  try {
-    // 获取所有活跃的休假记录
-    const activeLeaves = await db
-      .select({
-        id: leaves.id,
-        personId: leaves.personId,
-        startDate: leaves.startDate,
-        endDate: leaves.endDate,
-        leaveType: leaves.leaveType,
-        personName: persons.name,
-        lastContactDate: persons.lastContactDate,
-      })
-      .from(leaves)
-      .leftJoin(persons, eq(leaves.personId, persons.id))
-      .where(
-        and(
-          eq(leaves.status, 'active'),
-          gte(leaves.endDate, currentDate)
-        )
-      );
-
-    for (const leave of activeLeaves) {
-      const startDate = new Date(leave.startDate);
-      const endDate = new Date(leave.endDate);
-      const current = new Date(currentDate);
-      
-      // 休假前提醒（休假开始前1天）
-      const beforeDate = new Date(startDate);
-      beforeDate.setDate(beforeDate.getDate() - 1);
-      if (beforeDate.toISOString().split('T')[0] === currentDate) {
-        const result = await upsertReminder({
-          personId: leave.personId,
-          leaveId: leave.id,
-          reminderType: 'before',
-          reminderDate: currentDate,
-          priority: 'medium',
-          isHandled: false,
-        });
-        console.log(`📋 ${result.action === 'created' ? '创建' : '更新'}休假前提醒: ${leave.personName} (明日开始休假)`);
-      }
-
-      // 休假结束前提醒（休假结束前1天）
-      const endingDate = new Date(endDate);
-      endingDate.setDate(endingDate.getDate() - 1);
-      if (endingDate.toISOString().split('T')[0] === currentDate) {
-        const result = await upsertReminder({
-          personId: leave.personId,
-          leaveId: leave.id,
-          reminderType: 'ending',
-          reminderDate: currentDate,
-          priority: 'medium',
-          isHandled: false,
-        });
-        console.log(`📋 ${result.action === 'created' ? '创建' : '更新'}休假结束前提醒: ${leave.personName} (明日结束休假)`);
-      }
-
-      // 休假中提醒（休假期间每3天提醒一次）
-      // if (current >= startDate && current <= endDate) {
-      //   const daysSinceStart = Math.floor((current.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-      //   if (daysSinceStart > 0 && daysSinceStart % 3 === 0) {
-      //     await db.insert(reminders).values({
-      //       personId: leave.personId,
-      //       leaveId: leave.id,
-      //       reminderType: 'during',
-      //       reminderDate: currentDate,
-      //       priority: 'medium',
-      //       isHandled: false,
-      //     });
-      //     console.log(`📋 创建休假中提醒: ${leave.personName} (休假第${daysSinceStart + 1}天)`);
-      //   }
-      // }
-    }
-  } catch (error) {
-    console.error('❌ 处理休假提醒失败:', error);
-    throw error;
-  }
-}
-
-/**
- * 处理基于阈值的联系提醒
- */
-async function processContactReminders(userSettingsMap) {
+async function processAllReminders(userSettingsMap) {
   const currentDate = getCurrentDate();
   let createdCount = 0;
   let updatedCount = 0;
+  let skippedCount = 0;
 
   try {
-    // 获取所有非休假期间的人员及其配置
-    const personsWithSettings = await db
+    // 只获取当前正在休假中的人员（在外人员）
+    const activeLeavePersons = await db
       .select({
-        id: persons.id,
-        name: persons.name,
+        personId: persons.id,
+        personName: persons.name,
         lastContactDate: persons.lastContactDate,
+        createdAt: persons.createdAt,
         createdBy: persons.createdBy,
         urgentThreshold: reminderSettings.urgentThreshold,
         suggestThreshold: reminderSettings.suggestThreshold,
+        // 当前活跃的休假信息
+        leaveId: leaves.id,
+        leaveStartDate: leaves.startDate,
+        leaveEndDate: leaves.endDate,
       })
-      .from(persons)
+      .from(leaves)
+      .innerJoin(persons, eq(leaves.personId, persons.id))
       .leftJoin(reminderSettings, eq(persons.createdBy, reminderSettings.userId))
       .where(
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${leaves} l 
-          WHERE l.person_id = ${persons.id} 
-          AND l.status = 'active' 
-          AND ${currentDate} BETWEEN l.start_date AND l.end_date
-        )`
+        and(
+          eq(leaves.status, 'active'),
+          sql`${currentDate} >= ${leaves.startDate}`,
+          sql`${currentDate} <= ${leaves.endDate}`
+        )
       );
 
-    for (const person of personsWithSettings) {
-      // 计算距离上次联系的天数
-      let daysSinceContact = 999;
-      if (person.lastContactDate) {
-        const lastContact = new Date(person.lastContactDate);
-        const current = new Date(currentDate);
-        daysSinceContact = Math.floor((current.getTime() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
+    console.log(`📋 当前正在休假的人员数量: ${activeLeavePersons.length}`);
+
+    for (const person of activeLeavePersons) {
+      // 跳过已有未处理提醒的人员（确保每人只有一条提醒）
+      const existingReminders = await db
+        .select()
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.personId, person.personId),
+            eq(reminders.isHandled, false)
+          )
+        )
+        .limit(1);
+
+      if (existingReminders.length > 0) {
+        // 如果已有提醒，检查是否需要更新
+        const existingReminder = existingReminders[0];
+        
+        // 只在特定情况下更新提醒日期（休假结束前一天）
+        const endDate = new Date(person.leaveEndDate);
+        const endingDate = new Date(endDate);
+        endingDate.setDate(endingDate.getDate() - 1);
+        
+        if (endingDate.toISOString().split('T')[0] === currentDate) {
+          // 休假结束前一天，更新提醒
+          await db
+            .update(reminders)
+            .set({
+              reminderType: 'ending',
+              reminderDate: currentDate,
+              priority: 'medium',
+            })
+            .where(eq(reminders.id, existingReminder.id));
+          
+          console.log(`🔄 更新提醒: ${person.personName} (休假结束前一天)`);
+          updatedCount++;
+        }
+        
+        skippedCount++;
+        continue;
       }
 
-      // 优先使用用户的配置，其次使用数据库 JOIN 的配置，最后使用默认值
+      // 获取用户的提醒阈值配置
       let urgentThreshold = 10;
       let suggestThreshold = 7;
       
@@ -434,48 +446,102 @@ async function processContactReminders(userSettingsMap) {
         suggestThreshold = person.suggestThreshold;
       }
 
-      if (daysSinceContact >= urgentThreshold) {
-        // 紧急提醒
-        const result = await upsertReminder({
-          personId: person.id,
-          leaveId: null,
-          reminderType: 'overdue',
-          reminderDate: currentDate,
-          priority: 'high',
-          isHandled: false,
-        });
+      // 确定基准日期和计算天数（所有人都在休假中）
+      let baseDate = null;
+      let daysSinceBase = 0;
+
+      if (person.lastContactDate) {
+        // 情况1: 有上次联系记录，直接使用
+        baseDate = new Date(person.lastContactDate);
+      } else {
+        // 情况2: 无联系记录
+        const leaveStartDate = new Date(person.leaveStartDate);
+        const personCreatedAt = new Date(person.createdAt);
         
-        if (result.action === 'created') {
-          console.log(`🚨 创建紧急联系提醒: ${person.name} (已${daysSinceContact}天未联系)`);
-          createdCount++;
+        if (personCreatedAt < leaveStartDate) {
+          // 情况2.1: 人员添加在休假开始之前，以休假开始日期为基准
+          baseDate = leaveStartDate;
         } else {
-          console.log(`🚨 更新紧急联系提醒: ${person.name} (已${daysSinceContact}天未联系)`);
-          updatedCount++;
+          // 情况2.2: 人员在休假中添加，以添加日期为基准
+          baseDate = personCreatedAt;
         }
-      } else if (daysSinceContact >= suggestThreshold) {
-        // 建议提醒
+      }
+
+      // 计算距离基准日期的天数
+      const current = new Date(currentDate);
+      daysSinceBase = Math.floor((current.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
+
+      // 计算休假总天数
+      const startDate = new Date(person.leaveStartDate);
+      const endDate = new Date(person.leaveEndDate);
+      const leaveDuration = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      const isShortLeave = leaveDuration >= 3 && leaveDuration <= 6;
+      
+      // 判断是否明天结束休假
+      const endingDate = new Date(endDate);
+      endingDate.setDate(endingDate.getDate() - 1);
+      const isEndingTomorrow = endingDate.toISOString().split('T')[0] === currentDate;
+
+      // 判断是否需要创建提醒（所有人都在休假中）
+      let shouldCreateReminder = false;
+      let reminderType = 'overdue';
+      let priority = 'medium';
+
+      // 优先级1: 达到紧急阈值
+      if (daysSinceBase >= urgentThreshold) {
+        shouldCreateReminder = true;
+        reminderType = 'overdue';
+        priority = 'high';
+        console.log(`🚨 创建紧急提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
+      } 
+      // 优先级2: 达到建议阈值
+      else if (daysSinceBase >= suggestThreshold) {
+        shouldCreateReminder = true;
+        reminderType = 'overdue';
+        priority = 'medium';
+        console.log(`💡 创建建议提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
+      } 
+      // 优先级3: 短假特殊处理（3-6天的假期，第3天开始提醒）
+      else if (isShortLeave && daysSinceBase >= 3) {
+        shouldCreateReminder = true;
+        reminderType = 'during';
+        priority = 'medium';
+        console.log(`🏖️ 创建短假提醒: ${person.personName} (短假${leaveDuration}天，距离基准日期${daysSinceBase}天)`);
+      }
+      // 优先级4: 休假结束前一天，且距离基准日期至少5天
+      else if (isEndingTomorrow && daysSinceBase >= 5) {
+        shouldCreateReminder = true;
+        reminderType = 'ending';
+        priority = 'medium';
+        console.log(`📋 创建休假结束前提醒: ${person.personName} (明日结束休假，距离基准日期${daysSinceBase}天)`);
+      } 
+      else {
+        console.log(`⏭️  跳过: ${person.personName} (休假${leaveDuration}天，距离基准日期${daysSinceBase}天，未达到条件)`);
+      }
+
+      // 创建提醒
+      if (shouldCreateReminder) {
         const result = await upsertReminder({
-          personId: person.id,
-          leaveId: null,
-          reminderType: 'overdue',
+          personId: person.personId,
+          leaveId: person.leaveId,
+          reminderType: reminderType,
           reminderDate: currentDate,
-          priority: 'medium',
+          priority: priority,
           isHandled: false,
         });
         
         if (result.action === 'created') {
-          console.log(`💡 创建建议联系提醒: ${person.name} (已${daysSinceContact}天未联系)`);
           createdCount++;
         } else {
-          console.log(`💡 更新建议联系提醒: ${person.name} (已${daysSinceContact}天未联系)`);
           updatedCount++;
         }
       }
     }
 
-    return { createdCount, updatedCount };
+    console.log(`✅ 提醒处理完成: 创建${createdCount}条，更新${updatedCount}条，跳过${skippedCount}条`);
+    return { createdCount, updatedCount, skippedCount };
   } catch (error) {
-    console.error('❌ 处理联系提醒失败:', error);
+    console.error('❌ 处理提醒失败:', error);
     throw error;
   }
 }
@@ -499,8 +565,8 @@ async function main() {
   console.log(`🌍 服务器时区: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
 
   try {
-    // 1. 删除昨天休假结束的人员及其相关记录
-    const { deletedCount, deletedNames } = await deleteCompletedPersons();
+    // 1. 更新昨天休假结束的记录状态为 completed
+    const { updatedCount: completedLeavesCount, updatedNames, handledRemindersCount } = await updateCompletedLeaves();
     
     // 2. 获取所有用户的提醒阈值设置
     const userSettingsMap = await getUserReminderSettings();
@@ -508,11 +574,8 @@ async function main() {
     // 3. 更新休假状态（昨天之前结束的休假）
     await updateLeaveStatus();
 
-    // 4. 处理休假相关提醒
-    await processLeaveReminders();
-
-    // 5. 处理基于阈值的联系提醒
-    const { createdCount, updatedCount } = await processContactReminders(userSettingsMap);
+    // 4. 统一处理所有提醒（休假+联系提醒）
+    const { createdCount, updatedCount, skippedCount } = await processAllReminders(userSettingsMap);
 
     // 注意：提醒记录永久保留用于季度和年度统计分析，不再清理
 
@@ -520,8 +583,9 @@ async function main() {
     const duration = endTime.getTime() - startTime.getTime();
 
     console.log(`✅ 提醒更新任务完成`);
-    console.log(`📊 删除了 ${deletedCount} 位休假结束的人员${deletedNames && deletedNames.length > 0 ? ': ' + deletedNames.join(', ') : ''}`);
-    console.log(`📊 创建了 ${createdCount} 条新提醒，更新了 ${updatedCount} 条提醒记录`);
+    console.log(`📊 更新了 ${completedLeavesCount} 条休假记录状态为 completed${updatedNames && updatedNames.length > 0 ? ': ' + updatedNames.join(', ') : ''}`);
+    console.log(`📊 自动处理了 ${handledRemindersCount} 条休假结束关联的提醒`);
+    console.log(`📊 创建了 ${createdCount} 条新提醒，更新了 ${updatedCount} 条提醒，跳过了 ${skippedCount} 个已有提醒的人员`);
     console.log(`⏱️  执行耗时: ${duration}ms`);
     console.log(`🕐 完成时间: ${endTime.toISOString()}`);
 
