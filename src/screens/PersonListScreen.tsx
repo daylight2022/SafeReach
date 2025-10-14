@@ -8,6 +8,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
+  ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import LinearGradient from 'react-native-linear-gradient';
@@ -25,9 +26,13 @@ interface Props {
 
 type SortOrder = 'default' | 'asc' | 'desc';
 
+interface FilteredPerson extends Person {
+  matchedField?: string; // 搜索匹配的字段
+}
+
 const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   const [persons, setPersons] = useState<Person[]>([]);
-  const [filteredPersons, setFilteredPersons] = useState<Person[]>([]);
+  const [filteredPersons, setFilteredPersons] = useState<FilteredPerson[]>([]);
   const [searchText, setSearchText] = useState('');
   const [filterStatus, setFilterStatus] = useState<PersonStatus[]>([]);
   const [filterPersonType, setFilterPersonType] = useState<
@@ -175,19 +180,41 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   };
 
   const filterPersons = () => {
-    let filtered = [...persons];
+    let filtered: FilteredPerson[] = [...persons];
 
     // 搜索过滤
     if (searchText) {
       const searchLower = searchText.toLowerCase().trim();
-      filtered = filtered.filter(
-        person =>
-          person.name.toLowerCase().includes(searchLower) ||
-          person.emergencyContact?.toLowerCase().includes(searchLower) ||
-          person.phone?.toLowerCase().includes(searchLower) ||
-          person.department?.name.toLowerCase().includes(searchLower) ||
-          person.currentLeave?.location?.toLowerCase().includes(searchLower),
-      );
+      filtered = filtered.filter(person => {
+        // 检查每个字段并记录匹配的字段
+        if (person.name.toLowerCase().includes(searchLower)) {
+          (person as FilteredPerson).matchedField = '姓名';
+          return true;
+        }
+        if (person.emergencyContact?.toLowerCase().includes(searchLower)) {
+          (person as FilteredPerson).matchedField = '紧急联系人';
+          return true;
+        }
+        if (person.phone?.toLowerCase().includes(searchLower)) {
+          (person as FilteredPerson).matchedField = '电话';
+          return true;
+        }
+        if (person.department?.name.toLowerCase().includes(searchLower)) {
+          (person as FilteredPerson).matchedField = '部门';
+          return true;
+        }
+        if (person.currentLeave?.location?.toLowerCase().includes(searchLower)) {
+          (person as FilteredPerson).matchedField = '所在地';
+          return true;
+        }
+        return false;
+      });
+    } else {
+      // 清除搜索时，移除匹配字段信息
+      filtered = filtered.map(person => {
+        const { matchedField, ...rest } = person as FilteredPerson;
+        return rest;
+      });
     }
 
     // 状态过滤（多选）
@@ -296,11 +323,13 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
     }
   };
 
-  const renderPerson = ({ item }: { item: Person }) => (
+  const renderPerson = ({ item }: { item: FilteredPerson }) => (
     <PersonCard
       person={item}
       onPress={() => handlePersonPress(item)}
       onContact={loadPersons}
+      matchedField={item.matchedField}
+      searchText={searchText}
     />
   );
 
@@ -353,6 +382,19 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
             >
               <Icon name="filter" size={14} color="#374151" />
               <Text style={styles.filterText}>筛选</Text>
+              {(filterStatus.length > 0 ||
+                filterPersonType.length > 0 ||
+                filterDepartment.length > 0 ||
+                filterLeaveType.length > 0) && (
+                <View style={styles.filterBadge}>
+                  <Text style={styles.filterBadgeText}>
+                    {filterStatus.length +
+                      filterPersonType.length +
+                      filterDepartment.length +
+                      filterLeaveType.length}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
             <TouchableOpacity style={styles.sortButton} onPress={handleSort}>
               <Icon name={getSortIcon()} size={14} color="#374151" />
@@ -360,6 +402,112 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* 筛选标签栏 */}
+        {(filterStatus.length > 0 ||
+          filterPersonType.length > 0 ||
+          filterDepartment.length > 0 ||
+          filterLeaveType.length > 0) && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterTagsContainer}
+            contentContainerStyle={styles.filterTagsContent}
+          >
+            {filterStatus.map(status => {
+              const statusMap = {
+                urgent: '紧急',
+                suggest: '建议',
+                normal: '正常',
+              };
+              return (
+                <TouchableOpacity
+                  key={status}
+                  style={styles.filterTag}
+                  onPress={() => {
+                    setFilterStatus(filterStatus.filter(s => s !== status));
+                  }}
+                >
+                  <Text style={styles.filterTagText}>
+                    状态: {statusMap[status]}
+                  </Text>
+                  <Icon name="times" size={12} color="#6B7280" />
+                </TouchableOpacity>
+              );
+            })}
+            
+            {filterPersonType.map(type => {
+              const typeMap = {
+                employee: '员工',
+                manager: '小组长',
+                intern: '实习生',
+              };
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={styles.filterTag}
+                  onPress={() => {
+                    setFilterPersonType(filterPersonType.filter(t => t !== type));
+                  }}
+                >
+                  <Text style={styles.filterTagText}>
+                    类型: {typeMap[type]}
+                  </Text>
+                  <Icon name="times" size={12} color="#6B7280" />
+                </TouchableOpacity>
+              );
+            })}
+            
+            {filterDepartment.map(deptId => {
+              const dept = departments.find(d => d.id === deptId);
+              return (
+                <TouchableOpacity
+                  key={deptId}
+                  style={styles.filterTag}
+                  onPress={() => {
+                    setFilterDepartment(filterDepartment.filter(d => d !== deptId));
+                  }}
+                >
+                  <Text style={styles.filterTagText}>
+                    部门: {dept?.name || deptId}
+                  </Text>
+                  <Icon name="times" size={12} color="#6B7280" />
+                </TouchableOpacity>
+              );
+            })}
+            
+            {filterLeaveType.map(type => {
+              const typeMap = {
+                vacation: '休假',
+                business: '出差',
+                study: '学习',
+                hospitalization: '住院',
+                care: '陪护',
+              };
+              return (
+                <TouchableOpacity
+                  key={type}
+                  style={styles.filterTag}
+                  onPress={() => {
+                    setFilterLeaveType(filterLeaveType.filter(t => t !== type));
+                  }}
+                >
+                  <Text style={styles.filterTagText}>
+                    在外: {typeMap[type]}
+                  </Text>
+                  <Icon name="times" size={12} color="#6B7280" />
+                </TouchableOpacity>
+              );
+            })}
+            
+            <TouchableOpacity
+              style={styles.clearAllTag}
+              onPress={handleResetFilters}
+            >
+              <Text style={styles.clearAllText}>清除全部</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
       </View>
 
       {/* List */}
@@ -517,6 +665,56 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.darkGray,
     marginTop: 12,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: COLORS.danger,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    fontSize: 10,
+    color: COLORS.white,
+    fontWeight: 'bold',
+  },
+  filterTagsContainer: {
+    marginTop: 12,
+    maxHeight: 36,
+  },
+  filterTagsContent: {
+    paddingRight: 16,
+    gap: 8,
+  },
+  filterTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    gap: 6,
+  },
+  filterTagText: {
+    fontSize: 12,
+    color: COLORS.primary,
+  },
+  clearAllTag: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  clearAllText: {
+    fontSize: 12,
+    color: COLORS.danger,
+    fontWeight: '500',
   },
 });
 

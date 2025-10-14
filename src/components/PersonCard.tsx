@@ -12,9 +12,11 @@ interface Props {
   person: Person;
   onPress: () => void;
   onContact: () => void;
+  matchedField?: string; // 搜索匹配的字段
+  searchText?: string; // 搜索文本
 }
 
-const PersonCard: React.FC<Props> = ({ person, onPress, onContact }) => {
+const PersonCard: React.FC<Props> = ({ person, onPress, onContact, matchedField, searchText }) => {
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showContactModal, setShowContactModal] = useState(false);
 
@@ -159,13 +161,30 @@ const PersonCard: React.FC<Props> = ({ person, onPress, onContact }) => {
       </View>
 
       <View style={styles.info}>
-        <Text style={styles.infoText}>
-          最后联系：{getHumanizedContactTime()}
-        </Text>
-        <Text style={styles.infoText}>
-          剩余假期：
-          {getRemainingDays() !== null ? `${getRemainingDays()}天` : '-'}
-        </Text>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoText}>
+            最后联系：{getHumanizedContactTime()}
+          </Text>
+          <Text style={styles.infoText}>
+            剩余假期：
+            {getRemainingDays() !== null ? `${getRemainingDays()}天` : '-'}
+          </Text>
+        </View>
+        
+        {/* 搜索匹配提示 */}
+        {matchedField && searchText && (
+          <View style={styles.matchedInfo}>
+            <Icon name="search" size={10} color="#6B7280" />
+            <Text style={styles.matchedText}>
+              匹配{matchedField}: 
+              {matchedField === '姓名' && person.name}
+              {matchedField === '紧急联系人' && person.emergencyContact}
+              {matchedField === '电话' && person.phone}
+              {matchedField === '部门' && (person.department?.name || person.departmentInfo?.name)}
+              {matchedField === '所在地' && person.currentLeave?.location}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.actions}>
@@ -278,9 +297,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   info: {
+    marginBottom: 12,
+  },
+  infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 12,
   },
   infoText: {
     fontSize: 12,
@@ -320,6 +341,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF2FF',
     borderWidth: 1,
     borderColor: COLORS.primary,
+  },
+  matchedInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  matchedText: {
+    fontSize: 11,
+    color: '#92400E',
   },
 });
 
