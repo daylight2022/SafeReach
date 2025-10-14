@@ -77,14 +77,30 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
         ),
       );
 
-    // 获取有活跃休假且有未处理提醒的人员（用于健康度计算和未处理提醒统计）
+    // 获取所有有活跃休假的人员（用于平均联系间隔和健康度计算）
     const currentDate = new Date().toISOString().split('T')[0];
-    const activeLeavePersonsWithReminders = await db
+    const activeLeavePersons = await db
       .select({
         personId: persons.id,
         personName: persons.name,
         leaveStartDate: leaves.startDate,
         lastContactDate: persons.lastContactDate,
+        personCreatedAt: persons.createdAt,
+      })
+      .from(persons)
+      .innerJoin(leaves, eq(persons.id, leaves.personId))
+      .where(
+        and(
+          eq(leaves.status, 'active'),
+          gte(leaves.endDate, currentDate),
+          departmentFilter,
+        ),
+      );
+
+    // 获取有活跃休假且有未处理提醒的人员（仅用于未处理提醒统计）
+    const activeLeavePersonsWithReminders = await db
+      .select({
+        personId: persons.id,
         reminderId: reminders.id,
         reminderPriority: reminders.priority,
       })
@@ -198,50 +214,54 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
     // 计算未处理提醒数（有活跃休假且有未处理提醒的人数）
     const unhandledReminders = activeLeavePersonsWithReminders.length;
 
-    // 计算平均联系间隔天数（新方案：统计所有联系间隔的综合平均值）
+    // 计算平均联系间隔天数（新方案：统计所有有活跃休假人员的联系间隔综合平均值）
     const avgContactInterval = await calculateAvgContactInterval(
-      activeLeavePersonsWithReminders,
+      activeLeavePersons,
       currentDate,
     );
 
-    // 计算健康度评分 - 基于有活跃休假且有提醒的人员的联系间隔
+    // 计算健康度评分 - 基于所有有活跃休假人员的所有历史联系间隔
+    // 对每个人员的所有联系间隔（休假开始/人员添加→第一次联系、联系之间、最后联系→今天）进行扣分
     // 扣分规则（含1天宽容度）：
-    // - ≤ 7天（7天建议阈值）：不扣分
-    // - 9-10天（超过建议但未达紧急）：每天扣1分
-    // - > 10天（超过10天紧急阈值）：每天扣3分
+    // - ≤ 7天：不扣分
+    // - 8-10天：每天扣1分
+    // - > 10天：每天扣3分，但单个间隔最多扣到第12天（上限9分）
     let healthScore = 100;
-    for (const person of activeLeavePersonsWithReminders) {
-      let interval = 0;
-      
-      if (person.lastContactDate) {
-        const lastContact = new Date(person.lastContactDate);
-        const today = new Date();
-        lastContact.setHours(0, 0, 0, 0);
-        today.setHours(0, 0, 0, 0);
-        interval = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
-      } else {
-        const leaveStart = new Date(person.leaveStartDate);
-        const today = new Date();
-        leaveStart.setHours(0, 0, 0, 0);
-        today.setHours(0, 0, 0, 0);
-        interval = Math.floor((today.getTime() - leaveStart.getTime()) / (1000 * 60 * 60 * 24));
-      }
-      
-      // 应用1天宽容度的扣分规则
-      if (interval > 10) {
-        // 超过紧急阈值（10天），每天扣3分
-        healthScore -= (interval - 10) * 3;
-        // 加上9-11天的扣分（3天 × 1分）
-        healthScore -= 3;
-      } else if (interval > 7) {
-        // 超过建议阈值（7天），每天扣1分
-        healthScore -= (interval - 7) * 1;
-      }
-      // interval ≤ 7：不扣分
-    }
     
-    healthScore = Math.max(0, Math.round(healthScore));
-    console.log('🏥 健康度评分:', healthScore);
+    // 如果是管理员，按部门分别计算健康度，然后等比例累加
+    if (currentUser.role === 'admin') {
+      console.log('👨‍💼 管理员模式：按部门等比例计算综合健康度');
+      
+      // 获取部门排名（已包含各部门健康度）
+      const deptRanking = await getDepartmentRanking(timeRangeStart, timeRangeEnd);
+      
+      if (deptRanking.length > 0) {
+        // 每个部门分配的分数 = 100 / 部门数
+        const scorePerDept = 100 / deptRanking.length;
+        
+        // 累加各部门的等比例健康度
+        healthScore = deptRanking.reduce((total, dept) => {
+          return total + (dept.healthScore / 100) * scorePerDept;
+        }, 0);
+        
+        healthScore = Math.round(healthScore);
+        console.log(`🏥 综合健康度评分: ${healthScore}分 (${deptRanking.length}个部门平均)`);
+      }
+    } else {
+      // 普通用户：单个部门的健康度
+      for (const person of activeLeavePersons) {
+        const penalty = await calculatePersonHealthPenalty(
+          person.personId,
+          person.leaveStartDate,
+          currentDate,
+          person.personCreatedAt || undefined,
+        );
+        healthScore -= penalty;
+      }
+      
+      healthScore = Math.max(0, Math.round(healthScore));
+      console.log('🏥 部门健康度评分:', healthScore);
+    }
 
     // 获取部门排名（管理员可见多部门）
     let departmentRanking = [];
@@ -279,7 +299,7 @@ statisticsRouter.get('/', validateQuery(StatisticsQuerySchema), async c => {
       },
       healthScore,
       healthScoreDetails: {
-        totalPersonsWithReminders: activeLeavePersonsWithReminders.length,
+        totalActiveLeavePersons: activeLeavePersons.length,
         avgContactInterval: avgContactInterval,
       },
     };
@@ -648,25 +668,29 @@ statisticsRouter.get('/personal', async c => {
 
 /**
  * 计算平均联系间隔（综合统计方案）
- * 统计有活跃休假人员的所有联系间隔：
+ * 统计所有有活跃休假人员的所有联系间隔：
  * - 第一次联系间隔：休假开始日期到第一次联系
  * - 中间联系间隔：每两次联系之间的差值
  * - 最后一次联系间隔：最后一次联系到当前日期（仅当休假未结束）
  * 返回所有间隔的平均值（保留1位小数）
+ * 
+ * @param activeLeavePersons 所有有活跃休假的人员列表
+ * @param currentDate 当前日期
+ * @returns 平均联系间隔天数（保留1位小数）
  */
 async function calculateAvgContactInterval(
-  personsWithReminders: Array<{
+  activeLeavePersons: Array<{
     personId: string;
     leaveStartDate: string;
   }>,
   currentDate: string,
 ): Promise<number> {
-  if (personsWithReminders.length === 0) return 0;
+  if (activeLeavePersons.length === 0) return 0;
 
   let totalIntervals = 0;
   let intervalCount = 0;
 
-  for (const person of personsWithReminders) {
+  for (const person of activeLeavePersons) {
     // 获取该人员当前活跃休假的信息
     const [activeLeave] = await db
       .select({
@@ -755,8 +779,140 @@ async function calculateAvgContactInterval(
 }
 
 /**
+ * 计算单个人员的健康度扣分
+ * 检查该人员在活跃休假期间的所有联系间隔，对超过阈值的间隔进行扣分
+ * 
+ * @param personId 人员ID
+ * @param leaveStartDate 休假开始日期
+ * @param currentDate 当前日期
+ * @param personCreatedAt 人员添加日期（用于判断第一次联系间隔起点）
+ * @returns 该人员应扣除的分数
+ */
+async function calculatePersonHealthPenalty(
+  personId: string,
+  leaveStartDate: string,
+  currentDate: string,
+  personCreatedAt?: Date,
+): Promise<number> {
+  let penalty = 0;
+
+  const leaveStart = new Date(leaveStartDate);
+  const today = new Date(currentDate);
+  leaveStart.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  // 获取该人员当前活跃休假的信息
+  const [activeLeave] = await db
+    .select({
+      id: leaves.id,
+      startDate: leaves.startDate,
+      endDate: leaves.endDate,
+      status: leaves.status,
+    })
+    .from(leaves)
+    .where(
+      and(
+        eq(leaves.personId, personId),
+        eq(leaves.status, 'active'),
+        gte(leaves.endDate, currentDate),
+      ),
+    )
+    .orderBy(leaves.startDate)
+    .limit(1);
+
+  if (!activeLeave) return penalty;
+
+  const leaveEndDate = new Date(activeLeave.endDate);
+  leaveEndDate.setHours(0, 0, 0, 0);
+
+  // 获取该人员在当前休假期间的所有联系记录（按日期升序）
+  const contactRecords = await db
+    .select({
+      contactDate: contacts.contactDate,
+    })
+    .from(contacts)
+    .where(
+      and(
+        eq(contacts.personId, personId),
+        gte(contacts.contactDate, leaveStart),
+      ),
+    )
+    .orderBy(contacts.contactDate);
+
+  const intervals: number[] = [];
+
+  // 确定第一次联系间隔的起点日期
+  // 如果休假开始日期早于人员添加日期，则从人员添加日期开始计算
+  let firstIntervalStartDate = leaveStart;
+  if (personCreatedAt) {
+    const personCreated = new Date(personCreatedAt);
+    personCreated.setHours(0, 0, 0, 0);
+    if (leaveStart.getTime() < personCreated.getTime()) {
+      firstIntervalStartDate = personCreated;
+    }
+  }
+
+  if (contactRecords.length === 0) {
+    // 没有联系记录：间隔 = 第一次联系起点到今天
+    const interval = Math.floor((today.getTime() - firstIntervalStartDate.getTime()) / (1000 * 60 * 60 * 24));
+    intervals.push(interval);
+  } else {
+    // 第一次联系间隔：第一次联系起点到第一次联系
+    const firstContactDate = new Date(contactRecords[0].contactDate);
+    firstContactDate.setHours(0, 0, 0, 0);
+    const firstInterval = Math.floor((firstContactDate.getTime() - firstIntervalStartDate.getTime()) / (1000 * 60 * 60 * 24));
+    intervals.push(firstInterval);
+
+    // 中间联系间隔：每两次联系之间
+    for (let i = 1; i < contactRecords.length; i++) {
+      const prevContactDate = new Date(contactRecords[i - 1].contactDate);
+      const currContactDate = new Date(contactRecords[i].contactDate);
+      prevContactDate.setHours(0, 0, 0, 0);
+      currContactDate.setHours(0, 0, 0, 0);
+      const interval = Math.floor((currContactDate.getTime() - prevContactDate.getTime()) / (1000 * 60 * 60 * 24));
+      intervals.push(interval);
+    }
+
+    // 最后一次联系间隔：最后一次联系到今天（仅当休假未结束）
+    const lastContactDate = new Date(contactRecords[contactRecords.length - 1].contactDate);
+    lastContactDate.setHours(0, 0, 0, 0);
+    
+    const isLeaveEnded = today.getTime() > leaveEndDate.getTime();
+    
+    if (!isLeaveEnded) {
+      const lastInterval = Math.floor((today.getTime() - lastContactDate.getTime()) / (1000 * 60 * 60 * 24));
+      intervals.push(lastInterval);
+    }
+  }
+
+  // 对每个间隔应用扣分规则（含1天宽容度）
+  // 单个间隔最多扣到第12天（上限9分）
+  for (const interval of intervals) {
+    let intervalPenalty = 0;
+    
+    if (interval > 10) {
+      // 超过紧急阈值（10天），每天扣3分
+      // 但最多扣到第12天（即最多再扣2天 × 3分 = 6分）
+      const daysOver10 = Math.min(interval - 10, 2); // 最多算2天
+      intervalPenalty += daysOver10 * 3;
+      // 加上8-10天的扣分（3天 × 1分）
+      intervalPenalty += 3;
+    } else if (interval > 7) {
+      // 超过建议阈值（7天），每天扣1分
+      intervalPenalty += (interval - 7) * 1;
+    }
+    // interval ≤ 7：不扣分
+    
+    penalty += intervalPenalty;
+  }
+
+  return penalty;
+}
+
+/**
  * 获取所有部门的排名（仅管理员）
- * 使用扣分制健康度评分进行排名
+ * 基于所有有活跃休假人员的联系情况计算健康度评分并排名
+ * 使用扣分制健康度评分进行排名（分数越高越好）
  */
 async function getDepartmentRanking(
   startDate: Date,
@@ -805,15 +961,30 @@ async function getDepartmentRanking(
           ),
         );
 
-      // 获取该部门有活跃休假且有未处理提醒的人员
-      const deptActiveLeavePersonsWithReminders = await db
+      // 获取该部门所有有活跃休假的人员
+      const deptActiveLeavePersons = await db
         .select({
           personId: persons.id,
           personName: persons.name,
           leaveStartDate: leaves.startDate,
           lastContactDate: persons.lastContactDate,
+          personCreatedAt: persons.createdAt,
+        })
+        .from(persons)
+        .innerJoin(leaves, eq(persons.id, leaves.personId))
+        .where(
+          and(
+            eq(leaves.status, 'active'),
+            gte(leaves.endDate, currentDate),
+            deptFilter,
+          ),
+        );
+
+      // 获取该部门有活跃休假且有未处理提醒的人员（仅用于未处理提醒统计）
+      const deptActiveLeavePersonsWithReminders = await db
+        .select({
+          personId: persons.id,
           reminderId: reminders.id,
-          reminderPriority: reminders.priority,
         })
         .from(persons)
         .innerJoin(leaves, eq(persons.id, leaves.personId))
@@ -831,9 +1002,9 @@ async function getDepartmentRanking(
 
       const unhandledReminders = deptActiveLeavePersonsWithReminders.length;
 
-      // 计算该部门的平均联系间隔（使用综合统计方案）
+      // 计算该部门的平均联系间隔（使用综合统计方案，基于所有有活跃休假的人员）
       const avgContactInterval = await calculateAvgContactInterval(
-        deptActiveLeavePersonsWithReminders,
+        deptActiveLeavePersons,
         currentDate,
       );
 
@@ -851,32 +1022,16 @@ async function getDepartmentRanking(
         );
       const urgentCount = deptUrgentCount || 0;
 
-      // 计算该部门的健康度评分（应用1天宽容度）
+      // 计算该部门的健康度评分（基于所有有活跃休假人员的所有历史联系间隔）
       let healthScore = 100;
-      for (const person of deptActiveLeavePersonsWithReminders) {
-        let interval = 0;
-        
-        if (person.lastContactDate) {
-          const lastContact = new Date(person.lastContactDate);
-          const today = new Date();
-          lastContact.setHours(0, 0, 0, 0);
-          today.setHours(0, 0, 0, 0);
-          interval = Math.floor((today.getTime() - lastContact.getTime()) / (1000 * 60 * 60 * 24));
-        } else {
-          const leaveStart = new Date(person.leaveStartDate);
-          const today = new Date();
-          leaveStart.setHours(0, 0, 0, 0);
-          today.setHours(0, 0, 0, 0);
-          interval = Math.floor((today.getTime() - leaveStart.getTime()) / (1000 * 60 * 60 * 24));
-        }
-        
-        // 应用1天宽容度的扣分规则
-        if (interval > 11) {
-          healthScore -= (interval - 11) * 3;
-          healthScore -= 3; // 9-11天的扣分
-        } else if (interval > 8) {
-          healthScore -= (interval - 8) * 1;
-        }
+      for (const person of deptActiveLeavePersons) {
+        const penalty = await calculatePersonHealthPenalty(
+          person.personId,
+          person.leaveStartDate,
+          currentDate,
+          person.personCreatedAt || undefined,
+        );
+        healthScore -= penalty;
       }
       
       healthScore = Math.max(0, Math.round(healthScore));

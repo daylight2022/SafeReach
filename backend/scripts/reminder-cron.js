@@ -393,7 +393,7 @@ async function processAllReminders(userSettingsMap) {
     console.log(`📋 当前正在休假的人员数量: ${activeLeavePersons.length}`);
 
     for (const person of activeLeavePersons) {
-      // 跳过已有未处理提醒的人员（确保每人只有一条提醒）
+      // 检查是否有未处理提醒
       const existingReminders = await db
         .select()
         .from(reminders)
@@ -404,34 +404,6 @@ async function processAllReminders(userSettingsMap) {
           )
         )
         .limit(1);
-
-      if (existingReminders.length > 0) {
-        // 如果已有提醒，检查是否需要更新
-        const existingReminder = existingReminders[0];
-        
-        // 只在特定情况下更新提醒日期（休假结束前一天）
-        const endDate = new Date(person.leaveEndDate);
-        const endingDate = new Date(endDate);
-        endingDate.setDate(endingDate.getDate() - 1);
-        
-        if (endingDate.toISOString().split('T')[0] === currentDate) {
-          // 休假结束前一天，更新提醒
-          await db
-            .update(reminders)
-            .set({
-              reminderType: 'ending',
-              reminderDate: currentDate,
-              priority: 'medium',
-            })
-            .where(eq(reminders.id, existingReminder.id));
-          
-          console.log(`🔄 更新提醒: ${person.personName} (休假结束前一天)`);
-          updatedCount++;
-        }
-        
-        skippedCount++;
-        continue;
-      }
 
       // 获取用户的提醒阈值配置
       let urgentThreshold = 10;
@@ -467,9 +439,11 @@ async function processAllReminders(userSettingsMap) {
         }
       }
 
-      // 计算距离基准日期的天数
+      // 计算距离基准日期的天数（使用日历日期差，不是绝对24小时）
       const current = new Date(currentDate);
-      daysSinceBase = Math.floor((current.getTime() - baseDate.getTime()) / (1000 * 60 * 60 * 24));
+      const baseDay = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+      const currentDay = new Date(current.getFullYear(), current.getMonth(), current.getDate());
+      daysSinceBase = Math.floor((currentDay.getTime() - baseDay.getTime()) / (1000 * 60 * 60 * 24));
 
       // 计算休假总天数
       const startDate = new Date(person.leaveStartDate);
@@ -482,59 +456,86 @@ async function processAllReminders(userSettingsMap) {
       endingDate.setDate(endingDate.getDate() - 1);
       const isEndingTomorrow = endingDate.toISOString().split('T')[0] === currentDate;
 
-      // 判断是否需要创建提醒（所有人都在休假中）
-      let shouldCreateReminder = false;
+      // 判断应该设置什么提醒类型和优先级
+      let shouldCreateOrUpdateReminder = false;
       let reminderType = 'overdue';
       let priority = 'medium';
 
       // 优先级1: 达到紧急阈值
       if (daysSinceBase >= urgentThreshold) {
-        shouldCreateReminder = true;
+        shouldCreateOrUpdateReminder = true;
         reminderType = 'overdue';
         priority = 'high';
-        console.log(`🚨 创建紧急提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
+        console.log(`🚨 处理紧急提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
       } 
       // 优先级2: 达到建议阈值
       else if (daysSinceBase >= suggestThreshold) {
-        shouldCreateReminder = true;
+        shouldCreateOrUpdateReminder = true;
         reminderType = 'overdue';
         priority = 'medium';
-        console.log(`💡 创建建议提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
+        console.log(`💡 处理建议提醒: ${person.personName} (距离基准日期${daysSinceBase}天，休假${leaveDuration}天)`);
       } 
       // 优先级3: 短假特殊处理（3-6天的假期，第3天开始提醒）
       else if (isShortLeave && daysSinceBase >= 3) {
-        shouldCreateReminder = true;
+        shouldCreateOrUpdateReminder = true;
         reminderType = 'during';
         priority = 'medium';
-        console.log(`🏖️ 创建短假提醒: ${person.personName} (短假${leaveDuration}天，距离基准日期${daysSinceBase}天)`);
+        console.log(`🏖️ 处理短假提醒: ${person.personName} (短假${leaveDuration}天，距离基准日期${daysSinceBase}天)`);
       }
       // 优先级4: 休假结束前一天，且距离基准日期至少5天
       else if (isEndingTomorrow && daysSinceBase >= 5) {
-        shouldCreateReminder = true;
+        shouldCreateOrUpdateReminder = true;
         reminderType = 'ending';
         priority = 'medium';
-        console.log(`📋 创建休假结束前提醒: ${person.personName} (明日结束休假，距离基准日期${daysSinceBase}天)`);
+        console.log(`📋 处理休假结束前提醒: ${person.personName} (明日结束休假，距离基准日期${daysSinceBase}天)`);
       } 
       else {
         console.log(`⏭️  跳过: ${person.personName} (休假${leaveDuration}天，距离基准日期${daysSinceBase}天，未达到条件)`);
       }
 
-      // 创建提醒
-      if (shouldCreateReminder) {
-        const result = await upsertReminder({
-          personId: person.personId,
-          leaveId: person.leaveId,
-          reminderType: reminderType,
-          reminderDate: currentDate,
-          priority: priority,
-          isHandled: false,
-        });
-        
-        if (result.action === 'created') {
-          createdCount++;
+      // 创建或更新提醒
+      if (shouldCreateOrUpdateReminder) {
+        if (existingReminders.length > 0) {
+          // 如果已有未处理提醒，检查是否需要更新优先级
+          const existingReminder = existingReminders[0];
+          
+          // 如果优先级或类型发生变化，则更新
+          if (existingReminder.priority !== priority || existingReminder.reminderType !== reminderType) {
+            await db
+              .update(reminders)
+              .set({
+                reminderType: reminderType,
+                reminderDate: currentDate,
+                priority: priority,
+              })
+              .where(eq(reminders.id, existingReminder.id));
+            
+            console.log(`🔄 更新提醒: ${person.personName} (优先级: ${existingReminder.priority} -> ${priority})`);
+            updatedCount++;
+          } else {
+            console.log(`✓ 保持现有提醒: ${person.personName} (优先级: ${priority})`);
+            skippedCount++;
+          }
         } else {
-          updatedCount++;
+          // 创建新提醒
+          const result = await upsertReminder({
+            personId: person.personId,
+            leaveId: person.leaveId,
+            reminderType: reminderType,
+            reminderDate: currentDate,
+            priority: priority,
+            isHandled: false,
+          });
+          
+          if (result.action === 'created') {
+            createdCount++;
+          } else {
+            updatedCount++;
+          }
         }
+      } else if (existingReminders.length > 0) {
+        // 未达到条件但有旧提醒，保持不变
+        skippedCount++;
       }
     }
 

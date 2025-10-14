@@ -32,6 +32,23 @@ const StatusCard = ({
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
 
+  // 计算距离最后联系的天数（使用日历日期差）
+  const calculateDaysSinceContact = (lastContactDate: string | null | undefined): number => {
+    if (!lastContactDate) return 0;
+    
+    const today = new Date();
+    const contactDate = new Date(lastContactDate);
+    
+    // 只取日期部分，忽略时间
+    const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const contactDay = new Date(contactDate.getFullYear(), contactDate.getMonth(), contactDate.getDate());
+    
+    const diffTime = todayDay.getTime() - contactDay.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    return Math.max(0, diffDays);
+  };
+
   const handleContactPress = (item: any, e: any) => {
     e.stopPropagation(); // 阻止事件冒泡
     // 将 reminder 数据转换为 Person 格式
@@ -126,14 +143,14 @@ const StatusCard = ({
                     <Text style={styles.itemName}>{item.person?.name}</Text>
                     <Text style={styles.itemDesc}>
                       {status === 'urgent'
-                        ? `已${item.days || 0}天未联系`
-                        : item.reminder_type === 'before'
+                        ? `已${calculateDaysSinceContact(item.person?.lastContactDate)}天未联系`
+                        : item.reminderType === 'before'
                         ? '即将休假'
-                        : item.reminder_type === 'during'
+                        : item.reminderType === 'during'
                         ? '休假中'
-                        : item.reminder_type === 'ending'
+                        : item.reminderType === 'ending'
                         ? '即将结束休假'
-                        : item.reminder_type === 'overdue'
+                        : item.reminderType === 'overdue'
                         ? '超期未联系'
                         : '需要联系'}
                     </Text>

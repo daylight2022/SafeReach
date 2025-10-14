@@ -97,13 +97,14 @@ export function parseLeaveText(text: string): ParsedLeaveInfo {
       result.startDate = convertToFullDate(startDateStr, currentYear);
       result.endDate = convertToFullDate(endDateStr, currentYear);
 
-      // 计算天数
+      // 计算天数（使用日历日期差，不是绝对24小时）
       if (result.startDate && result.endDate) {
         const start = new Date(result.startDate);
         const end = new Date(result.endDate);
-        result.days =
-          Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) +
-          1;
+        // 只取日期部分，忽略时间
+        const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+        const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+        result.days = Math.floor((endDay.getTime() - startDay.getTime()) / (1000 * 60 * 60 * 24)) + 1;
       }
       break;
     }

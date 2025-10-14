@@ -331,6 +331,15 @@ else
     exit 1
 fi
 
+# 运行一次 reminder-cron 脚本进行提醒更新
+log_info "运行提醒更新脚本..."
+cd "$REMOTE_DEPLOY_PATH"
+if node scripts/reminder-cron.js; then
+    log_success "提醒更新脚本执行成功"
+else
+    log_warning "提醒更新脚本执行失败，请检查日志"
+fi
+
 log_success "🎉 服务器端部署完成！"
 
 # 清理临时文件

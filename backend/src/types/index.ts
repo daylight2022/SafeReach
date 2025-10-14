@@ -181,8 +181,10 @@ export const ReminderQuerySchema = PaginationSchema.extend({
   reminderType: ReminderType.optional(),
   priority: Priority.optional(),
   isHandled: z
-    .string()
-    .transform(val => val === 'true')
+    .union([
+      z.string().transform(val => val === 'true'),
+      z.boolean(),
+    ])
     .optional(),
   reminderDate: z
     .string()

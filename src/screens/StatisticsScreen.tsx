@@ -141,31 +141,49 @@ const StatisticsScreen: React.FC<Props> = ({ navigation }) => {
                   基于联系间隔的扣分制（满分100分）
                 </Text>
                 <Text style={{fontSize: 13, color: '#6B7280', marginBottom: 12}}>
-                  💡 综合统计当前在假人员的联系间隔平均值
+                  💡 统计所有在假人员的各个联系间隔进行累积扣分
                 </Text>
                 <View style={styles.ruleList}>
                   <View style={styles.ruleItem}>
                     <View style={[styles.ruleDot, { backgroundColor: COLORS.success }]} />
-                <Text style={styles.ruleText}>
-                  联系间隔≤7天：不扣分
-                </Text>
-              </View>
-              <View style={styles.ruleItem}>
-                <View style={[styles.ruleDot, { backgroundColor: COLORS.warning }]} />
-                <Text style={styles.ruleText}>
-                  联系间隔8-10天：每多一天扣1分
-                </Text>
-              </View>
-              <View style={styles.ruleItem}>
-                <View style={[styles.ruleDot, { backgroundColor: COLORS.danger }]} />
-                <Text style={styles.ruleText}>
-                  联系间隔{'>'} 10天：每多一天扣3分
-                </Text>
-              </View>
+                    <Text style={styles.ruleText}>
+                      联系间隔≤7天：不扣分 ✅
+                    </Text>
+                  </View>
+                  <View style={styles.ruleItem}>
+                    <View style={[styles.ruleDot, { backgroundColor: COLORS.warning }]} />
+                    <Text style={styles.ruleText}>
+                      联系间隔8-10天：每多一天扣1分 ⚠️
+                    </Text>
+                  </View>
+                  <View style={styles.ruleItem}>
+                    <View style={[styles.ruleDot, { backgroundColor: COLORS.danger }]} />
+                    <Text style={styles.ruleText}>
+                      联系间隔11-12天：每多一天扣3分 🚨
+                    </Text>
+                  </View>
+                  <View style={styles.ruleItem}>
+                    <View style={[styles.ruleDot, { backgroundColor: '#DC2626' }]} />
+                    <Text style={styles.ruleText}>
+                      联系间隔{'>'}12天（扣分上限9分）⛔
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.ruleNote}>
-                  * 联系间隔计算：第一次（休假开始到首次联系）+ 中间（每两次联系之间）+ 最后一次（最后联系到当前，仅当休假未结束）
-                </Text>
+                <View style={styles.ruleNoteContainer}>
+                  <Text style={styles.ruleNoteTitle}>📋 间隔计算规则：</Text>
+                  <Text style={styles.ruleNoteItem}>
+                    • 第一次：休假开始/人员添加（取较晚者）→ 首次联系
+                  </Text>
+                  <Text style={styles.ruleNoteItem}>
+                    • 中间段：每两次联系之间的间隔
+                  </Text>
+                  <Text style={styles.ruleNoteItem}>
+                    • 最后段：最后联系 → 当前（仅休假未结束时）
+                  </Text>
+                  <Text style={[styles.ruleNoteItem, { marginTop: 8, fontStyle: 'italic', color: '#9CA3AF' }]}>
+                    * 管理员综合健康度 = 各部门健康度按部门数等比例累加
+                  </Text>
+                </View>
               </View>
             </View>
           </TouchableOpacity>
@@ -1334,6 +1352,24 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
+  },
+  ruleNoteContainer: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  ruleNoteTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 6,
+  },
+  ruleNoteItem: {
+    fontSize: 11,
+    color: '#6B7280',
+    lineHeight: 18,
+    paddingLeft: 4,
   },
   // 排名标题行样式
   rankingTitleRow: {
