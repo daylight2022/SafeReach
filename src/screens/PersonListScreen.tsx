@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { COLORS } from '@/utils/constants';
 import { Person, PersonStatus, User, Department } from '@/types';
 import PersonCard from '@/components/PersonCard';
 import FilterModal from '@/components/FilterModal';
+import PersonStatsBar from '@/components/PersonStatsBar';
 import { userStorage } from '@/utils/storage';
 import { apiServices } from '@/services/apiServices';
 
@@ -31,6 +32,8 @@ interface FilteredPerson extends Person {
 }
 
 const PersonListScreen: React.FC<Props> = ({ navigation }) => {
+  type LeaveType = 'vacation' | 'business' | 'study' | 'hospitalization' | 'care';
+
   const [persons, setPersons] = useState<Person[]>([]);
   const [filteredPersons, setFilteredPersons] = useState<FilteredPerson[]>([]);
   const [searchText, setSearchText] = useState('');
@@ -48,6 +51,27 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  const stats = useMemo(() => {
+    const leaveTypeCounts: Record<LeaveType, number> = {
+      vacation: 0,
+      business: 0,
+      study: 0,
+      hospitalization: 0,
+      care: 0,
+    };
+
+    for (const person of filteredPersons) {
+      const leaveType = person.currentLeave?.leaveType as LeaveType | undefined;
+      if (!leaveType) continue;
+      leaveTypeCounts[leaveType] += 1;
+    }
+
+    return {
+      total: filteredPersons.length,
+      leaveTypeCounts,
+    };
+  }, [filteredPersons]);
 
   useEffect(() => {
     loadCurrentUser();
@@ -508,6 +532,8 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </ScrollView>
         )}
+
+        <PersonStatsBar total={stats.total} leaveTypeCounts={stats.leaveTypeCounts} />
       </View>
 
       {/* List */}

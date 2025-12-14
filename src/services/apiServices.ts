@@ -185,40 +185,8 @@ export const reminderService = {
   handlePersonReminders: async (
     personId: string,
   ): Promise<ApiResponse<{ handledCount: number }>> => {
-    // 先获取该人员的未处理提醒列表
-    const remindersResult = await apiClient.get<{
-      reminders: Reminder[];
-      pagination: any;
-    }>('/reminders', {
-      personId,
-      isHandled: false,
-      limit: 100,
-    });
-
-    if (!remindersResult.success || !remindersResult.data?.reminders) {
-      return {
-        success: false,
-        message: '获取提醒记录失败',
-        data: { handledCount: 0 },
-      };
-    }
-
-    // 批量标记为已处理
-    let handledCount = 0;
-    for (const reminder of remindersResult.data.reminders) {
-      try {
-        await apiClient.post(`/reminders/${reminder.id}/handle`);
-        handledCount++;
-      } catch (error) {
-        console.warn(`标记提醒 ${reminder.id} 失败:`, error);
-      }
-    }
-
-    return {
-      success: true,
-      message: `已标记 ${handledCount} 条提醒为已处理`,
-      data: { handledCount },
-    };
+    // 调用后端批量处理API
+    return apiClient.post(`/reminders/person/${personId}/handle`);
   },
 };
 

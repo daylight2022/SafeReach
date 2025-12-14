@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { eq, and, count, desc, gte, lte } from 'drizzle-orm';
 import { db } from '../db/connection.js';
-import { contacts, persons, users, leaves } from '../db/schema.js';
+import { contacts, persons, users, leaves, reminders } from '../db/schema.js';
 import { authMiddleware } from '../middleware/auth.js';
 import {
   validateBody,
@@ -230,6 +230,31 @@ contactsRouter.post('/', validateBody(CreateContactSchema), async c => {
         updatedAt: new Date(),
       })
       .where(eq(persons.id, contactData.personId));
+
+    // 自动标记该人员的未处理提醒为已处理（每人最多只有一条）
+    try {
+      const handledReminders = await db
+        .update(reminders)
+        .set({
+          isHandled: true,
+          handledBy: currentUser.userId,
+          handledAt: new Date(),
+        })
+        .where(
+          and(
+            eq(reminders.personId, contactData.personId),
+            eq(reminders.isHandled, false)
+          )
+        )
+        .returning();
+      
+      if (handledReminders.length > 0) {
+        console.log(`✅ 自动标记提醒为已处理 (personId: ${contactData.personId})`);
+      }
+    } catch (reminderError) {
+      // 不影响联系记录的创建，只记录错误
+      console.error('标记提醒失败:', reminderError);
+    }
 
     // 转换返回数据为API格式
     const convertedContact = convertDbToApi(newContact);

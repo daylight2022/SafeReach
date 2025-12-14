@@ -456,6 +456,51 @@ remindersRouter.post(
 );
 
 /**
+ * 标记某人员的未处理提醒为已处理
+ * POST /reminders/person/:personId/handle
+ * 注：每人最多只有一条未处理提醒，前端已做权限控制
+ */
+remindersRouter.post(
+  '/person/:personId/handle',
+  validateParams(z.object({ personId: z.string().uuid() })),
+  async c => {
+    try {
+      const { personId } = c.get('validatedParams');
+      const currentUser = c.get('user');
+
+      // 标记该人员的未处理提醒为已处理（每人最多只有一条）
+      const handledReminders = await db
+        .update(reminders)
+        .set({
+          isHandled: true,
+          handledBy: currentUser.userId,
+          handledAt: new Date(),
+        })
+        .where(
+          and(
+            eq(reminders.personId, personId),
+            eq(reminders.isHandled, false)
+          )
+        )
+        .returning();
+
+      const handledCount = handledReminders.length;
+      
+      return successResponse(
+        c,
+        { handledCount },
+        handledCount > 0 
+          ? '提醒已标记为已处理' 
+          : '没有未处理的提醒记录'
+      );
+    } catch (error) {
+      console.error('标记提醒失败:', error);
+      return serverErrorResponse(c, error);
+    }
+  },
+);
+
+/**
  * 删除提醒记录
  * DELETE /reminders/:id
  */
@@ -563,7 +608,7 @@ remindersRouter.delete(
       }
 
       // 删除该人员当日的未处理提醒记录
-      const deleteResult = await db
+      const deletedReminders = await db
         .delete(reminders)
         .where(
           and(
@@ -571,9 +616,10 @@ remindersRouter.delete(
             eq(reminders.reminderDate, currentDate),
             eq(reminders.isHandled, false),
           ),
-        );
+        )
+        .returning();
 
-      const deletedCount = (deleteResult as any).rowCount || 0;
+      const deletedCount = deletedReminders.length;
       console.log(
         `🧹 已清除人员 ${personId} 当日的 ${deletedCount} 条未处理提醒记录`,
       );

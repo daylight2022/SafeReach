@@ -56,13 +56,20 @@ module.exports = {
       script: 'scripts/reminder-cron.js',
       instances: 1,
       exec_mode: 'fork',
-      // 移除 cron_restart，避免与脚本内部定时任务冲突
+
+      // 关键配置：每天凌晨 2 点执行
+      cron_restart: '0 2 * * *',
+
+      // 移除 autorestart，避免与 cron_restart 冲突
+      autorestart: false,
+
       env: {
         NODE_ENV: 'production',
       },
       env_production: {
         NODE_ENV: 'production',
       },
+
       // 日志配置
       log_file: './logs/cron-combined.log',
       out_file: './logs/cron-out.log',
@@ -77,7 +84,6 @@ module.exports = {
 
       // 监控配置
       watch: false,
-      autorestart: true,
 
       // 环境变量
       env_file: '.env',
@@ -85,6 +91,18 @@ module.exports = {
       // 合并日志
       merge_logs: true,
       time: true,
+
+      // 关键：设置执行超时时间，防止长时间运行
+      kill_timeout: 30000,
+
+      // 定时任务特有配置
+      cron_restart_timezone: 'Asia/Shanghai',
+
+      // 增加错误重试次数
+      max_restarts: 3,
+
+      // 监控执行时间
+      min_uptime: '2s',
     },
   ],
 };
