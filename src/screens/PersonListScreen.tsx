@@ -8,17 +8,15 @@ import {
   RefreshControl,
   ActivityIndicator,
   TextInput,
-  ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import LinearGradient from 'react-native-linear-gradient';
 import { NavigationProp, useFocusEffect } from '@react-navigation/native';
 import { COLORS } from '@/utils/constants';
-import { Person, PersonStatus, User, Department } from '@/types';
+import { Person, PersonStatus, Department } from '@/types';
 import PersonCard from '@/components/PersonCard';
-import FilterModal from '@/components/FilterModal';
+import PersonFilterBar from '@/components/PersonFilterBar';
 import PersonStatsBar from '@/components/PersonStatsBar';
-import { userStorage } from '@/utils/storage';
 import { apiServices } from '@/services/apiServices';
 
 interface Props {
@@ -49,8 +47,6 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('default');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [showFilter, setShowFilter] = useState(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const stats = useMemo(() => {
     const leaveTypeCounts: Record<LeaveType, number> = {
@@ -74,7 +70,6 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   }, [filteredPersons]);
 
   useEffect(() => {
-    loadCurrentUser();
     loadPersons();
     loadDepartments();
   }, []);
@@ -94,20 +89,10 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
   // 页面聚焦时刷新数据
   useFocusEffect(
     React.useCallback(() => {
-      loadCurrentUser();
       loadPersons();
       loadDepartments();
     }, []),
   );
-
-  const loadCurrentUser = async () => {
-    try {
-      const user = await userStorage.getCurrentUser();
-      setCurrentUser(user);
-    } catch (error) {
-      console.error('获取当前用户信息失败:', error);
-    }
-  };
 
   const loadDepartments = async () => {
     try {
@@ -401,24 +386,14 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
           </View>
           <View style={styles.actionButtons}>
             <TouchableOpacity
-              style={styles.filterButton}
-              onPress={() => setShowFilter(true)}
+              style={styles.resetButton}
+              onPress={() => {
+                setSearchText('');
+                handleResetFilters();
+              }}
             >
-              <Icon name="filter" size={14} color="#374151" />
-              <Text style={styles.filterText}>筛选</Text>
-              {(filterStatus.length > 0 ||
-                filterPersonType.length > 0 ||
-                filterDepartment.length > 0 ||
-                filterLeaveType.length > 0) && (
-                <View style={styles.filterBadge}>
-                  <Text style={styles.filterBadgeText}>
-                    {filterStatus.length +
-                      filterPersonType.length +
-                      filterDepartment.length +
-                      filterLeaveType.length}
-                  </Text>
-                </View>
-              )}
+              <Icon name="undo" size={14} color="#374151" />
+              <Text style={styles.resetText}>重置</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.sortButton} onPress={handleSort}>
               <Icon name={getSortIcon()} size={14} color="#374151" />
@@ -427,111 +402,17 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
 
-        {/* 筛选标签栏 */}
-        {(filterStatus.length > 0 ||
-          filterPersonType.length > 0 ||
-          filterDepartment.length > 0 ||
-          filterLeaveType.length > 0) && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.filterTagsContainer}
-            contentContainerStyle={styles.filterTagsContent}
-          >
-            {filterStatus.map(status => {
-              const statusMap = {
-                urgent: '紧急',
-                suggest: '建议',
-                normal: '正常',
-              };
-              return (
-                <TouchableOpacity
-                  key={status}
-                  style={styles.filterTag}
-                  onPress={() => {
-                    setFilterStatus(filterStatus.filter(s => s !== status));
-                  }}
-                >
-                  <Text style={styles.filterTagText}>
-                    状态: {statusMap[status]}
-                  </Text>
-                  <Icon name="times" size={12} color="#6B7280" />
-                </TouchableOpacity>
-              );
-            })}
-            
-            {filterPersonType.map(type => {
-              const typeMap = {
-                employee: '员工',
-                manager: '小组长',
-                intern: '实习生',
-              };
-              return (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.filterTag}
-                  onPress={() => {
-                    setFilterPersonType(filterPersonType.filter(t => t !== type));
-                  }}
-                >
-                  <Text style={styles.filterTagText}>
-                    类型: {typeMap[type]}
-                  </Text>
-                  <Icon name="times" size={12} color="#6B7280" />
-                </TouchableOpacity>
-              );
-            })}
-            
-            {filterDepartment.map(deptId => {
-              const dept = departments.find(d => d.id === deptId);
-              return (
-                <TouchableOpacity
-                  key={deptId}
-                  style={styles.filterTag}
-                  onPress={() => {
-                    setFilterDepartment(filterDepartment.filter(d => d !== deptId));
-                  }}
-                >
-                  <Text style={styles.filterTagText}>
-                    部门: {dept?.name || deptId}
-                  </Text>
-                  <Icon name="times" size={12} color="#6B7280" />
-                </TouchableOpacity>
-              );
-            })}
-            
-            {filterLeaveType.map(type => {
-              const typeMap = {
-                vacation: '休假',
-                business: '出差',
-                study: '学习',
-                hospitalization: '住院',
-                care: '陪护',
-              };
-              return (
-                <TouchableOpacity
-                  key={type}
-                  style={styles.filterTag}
-                  onPress={() => {
-                    setFilterLeaveType(filterLeaveType.filter(t => t !== type));
-                  }}
-                >
-                  <Text style={styles.filterTagText}>
-                    在外: {typeMap[type]}
-                  </Text>
-                  <Icon name="times" size={12} color="#6B7280" />
-                </TouchableOpacity>
-              );
-            })}
-            
-            <TouchableOpacity
-              style={styles.clearAllTag}
-              onPress={handleResetFilters}
-            >
-              <Text style={styles.clearAllText}>清除全部</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        )}
+        <PersonFilterBar
+          departments={departments}
+          currentStatus={filterStatus}
+          onStatusChange={setFilterStatus}
+          currentPersonType={filterPersonType}
+          onPersonTypeChange={setFilterPersonType}
+          currentDepartment={filterDepartment}
+          onDepartmentChange={setFilterDepartment}
+          currentLeaveType={filterLeaveType}
+          onLeaveTypeChange={setFilterLeaveType}
+        />
 
         <PersonStatsBar total={stats.total} leaveTypeCounts={stats.leaveTypeCounts} />
       </View>
@@ -559,21 +440,6 @@ const PersonListScreen: React.FC<Props> = ({ navigation }) => {
         />
       )}
 
-      {/* Filter Modal */}
-      <FilterModal
-        visible={showFilter}
-        onClose={() => setShowFilter(false)}
-        currentStatus={filterStatus}
-        onStatusChange={setFilterStatus}
-        currentPersonType={filterPersonType}
-        onPersonTypeChange={setFilterPersonType}
-        currentDepartment={filterDepartment}
-        onDepartmentChange={setFilterDepartment}
-        currentLeaveType={filterLeaveType}
-        onLeaveTypeChange={setFilterLeaveType}
-        departments={departments}
-        onReset={handleResetFilters}
-      />
     </View>
   );
 };
@@ -646,7 +512,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  filterButton: {
+  resetButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.gray,
@@ -655,7 +521,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     gap: 4,
   },
-  filterText: {
+  resetText: {
     fontSize: 14,
     color: '#374151',
   },
@@ -691,56 +557,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.darkGray,
     marginTop: 12,
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: COLORS.danger,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  filterBadgeText: {
-    fontSize: 10,
-    color: COLORS.white,
-    fontWeight: 'bold',
-  },
-  filterTagsContainer: {
-    marginTop: 12,
-    maxHeight: 36,
-  },
-  filterTagsContent: {
-    paddingRight: 16,
-    gap: 8,
-  },
-  filterTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EEF2FF',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
-    gap: 6,
-  },
-  filterTagText: {
-    fontSize: 12,
-    color: COLORS.primary,
-  },
-  clearAllTag: {
-    backgroundColor: '#FEE2E2',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  clearAllText: {
-    fontSize: 12,
-    color: COLORS.danger,
-    fontWeight: '500',
   },
 });
 

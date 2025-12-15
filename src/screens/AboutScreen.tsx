@@ -22,6 +22,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { getAppVersionWithPrefix, getAppBuildNumber } from '@/utils/version';
 import useVersionCheck from '@/hooks/useVersionCheck';
 import UpdateModal from '@/components/UpdateModal';
+import { apiServices } from '@/services/apiServices';
 import RNFS from 'react-native-fs';
 
 const { width } = Dimensions.get('window');
@@ -32,6 +33,7 @@ interface Props {
 
 const AboutScreen: React.FC<Props> = ({ navigation }) => {
   const [showQRCode, setShowQRCode] = useState(false);
+  const [isPreparingShare, setIsPreparingShare] = useState(false);
   const [appInfo, setAppInfo] = useState({
     name: '安心通',
     version: 'v1.0.0',
@@ -137,6 +139,67 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
         preset: 'error',
         duration: 2,
       });
+    }
+  };
+
+  const parseDownloadUrl = (downloadUrl: string) => {
+    if (!downloadUrl) return { url: '', password: '' };
+
+    const parts = downloadUrl.split('\n');
+    const url = parts[0]?.trim() || '';
+    const passwordPart = parts[1]?.trim() || '';
+    const passwordMatch = passwordPart.match(/密码[：:]\s*(.+)/);
+    const password = passwordMatch ? passwordMatch[1].trim() : '';
+
+    return { url, password };
+  };
+
+  const handleShareApp = async () => {
+    if (isPreparingShare) return;
+
+    setIsPreparingShare(true);
+    try {
+      const response = await apiServices.version.getLatestVersion();
+      if (!response.success || !response.data?.downloadUrl) {
+        toast({
+          title: '暂无可分享的下载信息',
+          preset: 'error',
+          duration: 2,
+        });
+        return;
+      }
+
+      const { url, password } = parseDownloadUrl(response.data.downloadUrl);
+      if (!url) {
+        toast({
+          title: '下载地址为空',
+          preset: 'error',
+          duration: 2,
+        });
+        return;
+      }
+
+      const shareText =
+        `【${appInfo.name}】安装包下载\n` +
+        `版本：v${response.data.version}\n` +
+        `下载地址：${url}` +
+        (password ? `\n密码：${password}` : '');
+
+      Clipboard.setString(shareText);
+      toast({
+        title: '下载信息已复制，可直接分享',
+        preset: 'done',
+        duration: 2,
+      });
+    } catch (error) {
+      console.error('获取下载信息失败:', error);
+      toast({
+        title: '获取下载信息失败',
+        preset: 'error',
+        duration: 2,
+      });
+    } finally {
+      setIsPreparingShare(false);
     }
   };
 
@@ -311,6 +374,30 @@ const AboutScreen: React.FC<Props> = ({ navigation }) => {
               )}
               <Text style={styles.updateText}>
                 {isChecking ? '检查中...' : '检查更新'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.shareButton,
+              isPreparingShare && styles.updateButtonDisabled,
+            ]}
+            onPress={handleShareApp}
+            activeOpacity={0.85}
+            disabled={isPreparingShare}
+          >
+            <LinearGradient
+              colors={['#ECFDF5', '#D1FAE5']}
+              style={styles.shareGradient}
+            >
+              {isPreparingShare ? (
+                <ActivityIndicator size="small" color="#10B981" />
+              ) : (
+                <Icon name="share-alt" size={16} color="#10B981" />
+              )}
+              <Text style={styles.shareText}>
+                {isPreparingShare ? '准备中...' : '分享App下载'}
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -620,7 +707,19 @@ const styles = StyleSheet.create({
   updateButton: {
     width: '100%',
   },
+  shareButton: {
+    width: '100%',
+    marginTop: 12,
+  },
   updateGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 16,
+  },
+  shareGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -632,6 +731,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.primary,
+  },
+  shareText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#10B981',
   },
   updateButtonDisabled: {
     opacity: 0.6,
