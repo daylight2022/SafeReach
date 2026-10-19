@@ -1,0 +1,50 @@
+name: Supabase Keep-alive
+
+# 每天北京时间 10:00 (UTC 02:00) 各请求一次, 防止免费版「7 天无 API 访问自动暂停」:
+#   1. 直连项目域名 — GitHub runner 在境外, 不受国内网络影响
+#   2. 走反代域名 — 顺带监控 Worker 是否存活, 失败会发告警邮件
+# 请求带 publishable key(受 RLS 保护、本就随 App 分发), /auth/v1/health 返回 200。
+# 注意: GitHub 定时任务只在仓库的默认分支(main)上运行;
+#       定时触发可能延迟 5~30 分钟, 相对 7 天窗口无影响。
+# 真实地址与 key 存仓库 Secrets(不公开), 本文件只引用:
+#   SUPABASE_PROJECT_URL     — 直连项目域名
+#   SUPABASE_PROXY_URL       — Cloudflare 反代域名
+#   SUPABASE_PUBLISHABLE_KEY — publishable key
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase (直连, 防暂停)
+        env:
+          KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          URL: ${{ secrets.SUPABASE_PROJECT_URL }}
+        run: |
+          code=$(curl -s -o /tmp/direct.json -w '%{http_code}' -m 30 \
+            -H "apikey: $KEY" \
+            "$URL/auth/v1/health")
+          echo "direct status=$code body=$(cat /tmp/direct.json)"
+          # 期望 200; 400/401 也是网关应答, 说明项目在线且活动已计入
+          if [ "$code" -ge 500 ] || [ "$code" = "000" ]; then
+            echo "::error::直连 Supabase 失败 (HTTP $code) — 到 Dashboard 看项目是否被暂停"
+            exit 1
+          fi
+
+      - name: Ping 反代域名 (监控 Worker 存活)
+        env:
+          KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          URL: ${{ secrets.SUPABASE_PROXY_URL }}
+        run: |
+          code=$(curl -s -o /tmp/proxy.json -w '%{http_code}' -m 30 \
+            -H "apikey: $KEY" \
+            "$URL/auth/v1/health")
+          echo "proxy status=$code body=$(cat /tmp/proxy.json)"
+          if [ "$code" -ge 500 ] || [ "$code" = "000" ]; then
+            echo "::error::反代失败 (HTTP $code) — 检查 Worker 部署/域名绑定"
+            exit 1
+          fi
